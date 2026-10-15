@@ -79,6 +79,24 @@ def run_remote(
         }
 
 
+def _decode_output(raw: bytes) -> str:
+    if not raw:
+        return ""
+    best = raw.decode("utf-8", errors="replace")
+    best_bad = best.count("\ufffd") + len(re.findall(r"\?{3,}", best))
+    for encoding in ("cp866", "cp1251"):
+        text = raw.decode(encoding, errors="replace")
+        bad = text.count("\ufffd") + len(re.findall(r"\?{3,}", text))
+        if bad < best_bad:
+            best, best_bad = text, bad
+    return best
+
+
+def repair_caption(text: str) -> str:
+    """Русская Windows пишет «Майкрософт» в названии выпуска. Старый ответ WinRM терял эти буквы."""
+    return re.sub(r"\?{3,}(?=\s*Windows)", "Майкрософт", text or "")
+
+
 def _run_winrm(host: str, port: int, username: str, password: str, script: str, timeout: int) -> dict[str, Any]:
     import winrm
 
@@ -93,6 +111,7 @@ def _run_winrm(host: str, port: int, username: str, password: str, script: str, 
         operation_timeout_sec=max(20, timeout - 5),
         read_timeout_sec=timeout + 10,
     )
+    script = "$OutputEncoding = [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false\n" + script
     encoded = base64.b64encode(script.encode("utf-16le")).decode("ascii")
     if len(encoded) > 6000:
         remote_b64 = r"C:\Windows\Temp\adguard-run.b64"
@@ -108,8 +127,8 @@ def _run_winrm(host: str, port: int, username: str, password: str, script: str, 
             "Invoke-Expression $body\n"
         )
     result = session.run_ps(script)
-    stdout = (result.std_out or b"").decode("utf-8", errors="replace")
-    stderr = (result.std_err or b"").decode("utf-8", errors="replace")
+    stdout = _decode_output(result.std_out or b"")
+    stderr = _decode_output(result.std_err or b"")
     ok = result.status_code == 0
     return {
         "ok": ok,
@@ -256,7 +275,7 @@ def _read_software_host(connection: dict[str, Any], host: str) -> tuple[str, lis
             {
                 "hostname": hostname,
                 "category": "Операционные системы",
-                "title": caption.strip() or "Windows 10",
+                "title": repair_caption(caption.strip()) or "Windows 10",
                 "severity": "medium",
                 "detail": f"Сборка {version}. Windows 10 не соответствует актуальному базису для рабочих мест.",
                 "tags": "windows10,compliance,module:software_audit",

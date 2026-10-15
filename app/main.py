@@ -63,7 +63,7 @@ from app.modules.notifier_mail import send_report
 from app.modules.notifier_tg import send_summary
 from app.modules.pingcastle import parse_pingcastle_xml, run_pingcastle
 from app.modules.posture import scan_hygiene, scan_time, scan_trusts
-from app.modules.software_scan import scan_adcs, scan_gpp, scan_software, validate_host
+from app.modules.software_scan import repair_caption, scan_adcs, scan_gpp, scan_software, validate_host
 
 load_dotenv(BASE_DIR / ".env")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -74,7 +74,7 @@ try:
 except Exception:
     TZ = ZoneInfo("UTC")
 
-PRODUCT_VERSION = "2.2.0"
+PRODUCT_VERSION = "2.3.0"
 
 ALLOWED_MODULES = (
     "pingcastle",
@@ -377,7 +377,7 @@ def inventory_public(row: Inventory) -> dict[str, Any]:
         "id": row.id,
         "hostname": row.hostname,
         "category": row.category,
-        "title": row.title,
+        "title": repair_caption(row.title or ""),
         "severity": row.severity,
         "severity_label": SEVERITY_RU.get(row.severity, row.severity),
         "detail": row.detail or "",
@@ -391,14 +391,40 @@ def inventory_public(row: Inventory) -> dict[str, Any]:
     }
 
 
+_DAY_RU = {"mon": "пн", "tue": "вт", "wed": "ср", "thu": "чт", "fri": "пт", "sat": "сб", "sun": "вс"}
+_DAY_ORDER = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+
+
+def parse_schedule(raw: str) -> tuple[list[str], int, int]:
+    text = (raw or "weekly").strip()
+    legacy = {"daily": list(_DAY_ORDER), "weekly": ["mon"], "monthly": ["mon"]}
+    if text in legacy:
+        return legacy[text], 2, 0
+    match = re.fullmatch(r"([a-z]{3}(?:,[a-z]{3})*)@(\d{2}):(\d{2})", text)
+    if not match:
+        return ["mon"], 2, 0
+    days = [part for part in match.group(1).split(",") if part in _DAY_RU]
+    hour, minute = int(match.group(2)), int(match.group(3))
+    if not days or hour > 23 or minute > 59:
+        return ["mon"], 2, 0
+    return days, hour, minute
+
+
+def schedule_phrase(raw: str) -> str:
+    if (raw or "") == "monthly":
+        return "1-го числа в 02:00"
+    days, hour, minute = parse_schedule(raw or "")
+    names = ", ".join(_DAY_RU[day] for day in _DAY_ORDER if day in days)
+    return f"{names} в {hour:02d}:{minute:02d}"
+
+
 def scheduler_view(company: Company) -> dict[str, Any]:
-    labels = {"daily": "ежедневно в 02:00", "weekly": "по понедельникам в 02:00", "monthly": "1-го числа в 02:00"}
     job = scheduler.get_job(f"scan-{company.id}")
     next_run = None
     if job and job.next_run_time:
         next_run = job.next_run_time.astimezone(TZ).strftime("%d.%m.%Y %H:%M")
     if company.scheduler_enabled:
-        label = "Включен, " + labels.get(company.schedule or "", company.schedule or "")
+        label = "Включен, " + schedule_phrase(company.schedule or "")
         if next_run:
             label += f", следующий запуск {next_run}"
     else:
@@ -532,7 +558,7 @@ def replace_findings(db: Session, company_id: int, module: str, findings: list[d
                 company_id=company_id,
                 hostname=str(item.get("hostname") or "")[:255],
                 category=str(item.get("category") or "Проверка")[:64],
-                title=str(item.get("title") or "Находка")[:512],
+                title=repair_caption(str(item.get("title") or "Находка"))[:512],
                 severity=str(item.get("severity") or "medium")[:16],
                 detail=str(item.get("detail") or ""),
                 tags=str(item.get("tags") or f"module:{module}")[:512],
@@ -1036,12 +1062,11 @@ def apply_company_schedule(company: Company) -> None:
         scheduler.remove_job(job_id)
     if not company.scheduler_enabled:
         return
-    triggers = {
-        "daily": CronTrigger(hour=2, minute=0, timezone=TZ),
-        "weekly": CronTrigger(day_of_week="mon", hour=2, minute=0, timezone=TZ),
-        "monthly": CronTrigger(day=1, hour=2, minute=0, timezone=TZ),
-    }
-    trigger = triggers.get(company.schedule or "weekly", triggers["weekly"])
+    if (company.schedule or "") == "monthly":
+        trigger = CronTrigger(day=1, hour=2, minute=0, timezone=TZ)
+    else:
+        days, hour, minute = parse_schedule(company.schedule or "")
+        trigger = CronTrigger(day_of_week=",".join(days), hour=hour, minute=minute, timezone=TZ)
     scheduler.add_job(
         scheduled_scan,
         trigger,
@@ -2010,8 +2035,10 @@ def delete_company(company_id: int, user: User = Depends(get_user), db: Session 
 @app.post("/api/schedule")
 def save_schedule(payload: ScheduleIn, user: User = Depends(get_user), db: Session = Depends(get_db)) -> dict[str, Any]:
     company = resolve_company(user, db, payload.company_id)
+    if payload.interval not in {"daily", "weekly", "monthly"} and not re.fullmatch(r"[a-z]{3}(?:,[a-z]{3})*@\d{2}:\d{2}", payload.interval or ""):
+        raise HTTPException(status_code=400, detail="Укажите дни недели и время")
     if payload.interval not in {"daily", "weekly", "monthly"}:
-        raise HTTPException(status_code=400, detail="Интервал: день, неделя или месяц")
+        parse_schedule(payload.interval)
     company.schedule = payload.interval
     company.scheduler_enabled = bool(payload.enabled)
     write_audit(

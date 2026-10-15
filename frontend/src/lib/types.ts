@@ -150,6 +150,7 @@ export type WikiItem = {
   what?: string
   impact?: string
   fix?: string
+  sev?: string
 }
 export type Filters = {
   q: string

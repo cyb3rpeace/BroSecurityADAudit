@@ -11,6 +11,18 @@ export const ACCOUNT_IDS = new Set([
   "not_in_protected_users",
   "honeytoken",
   "gpp_password",
+  "password_length",
+  "password_history",
+  "no_lockout",
+  "reversible_encryption",
+  "password_not_required",
+  "password_in_description",
+  "des_enabled",
+  "rc4_only",
+  "sid_history",
+  "pre_windows_2000",
+  "foreign_privileged",
+  "exchange_permissions",
 ])
 export const DEVICE_IDS = new Set([
   "obsolete_os",
@@ -23,12 +35,20 @@ export const DEVICE_IDS = new Set([
   "print_spooler_on_dc",
   "time_skew",
   "time_ok",
+  "stale_computer",
+  "single_dc",
+  "orphan_subnet",
+  "ntfrs_sysvol",
 ])
 export const PATH_IDS = new Set([
   "kerberoasting",
   "unconstrained_delegation",
   "asrep_preauth",
   "adcs_enrollee_san",
+  "constrained_delegation",
+  "rbcd",
+  "shadow_credential",
+  "machine_quota",
 ])
 
 const SOURCE_NAMES: Record<string, string> = {

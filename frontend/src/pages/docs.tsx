@@ -12,7 +12,7 @@ function loadWiki() {
   if (window.BROSEC_WIKI) return Promise.resolve(window.BROSEC_WIKI)
   return new Promise<WikiItem[]>((resolve) => {
     const script = document.createElement("script")
-    script.src = "/static/wiki.js?v=13"
+    script.src = "/static/wiki.js?v=14"
     script.onload = () => resolve(window.BROSEC_WIKI || [])
     script.onerror = () => resolve([])
     document.body.appendChild(script)
@@ -41,8 +41,24 @@ const DOCS = {
   ],
 } as const
 
+const SEV: Record<string, string> = {
+  critical: "Критический",
+  high: "Высокий",
+  medium: "Средний",
+  low: "Низкий",
+  info: "Информация",
+}
+
+function sevClass(sev: string) {
+  if (sev === "critical") return "bg-red-500/15 text-red-700 dark:text-red-300"
+  if (sev === "high") return "bg-orange-500/15 text-orange-700 dark:text-orange-300"
+  if (sev === "medium") return "bg-amber-500/15 text-amber-800 dark:text-amber-200"
+  if (sev === "low") return "bg-sky-500/15 text-sky-800 dark:text-sky-200"
+  return "bg-muted text-muted-foreground"
+}
+
 export function Docs() {
-  const { t, lang } = useApp()
+  const { t, lang, inventory } = useApp()
   const [items, setItems] = useState<WikiItem[]>([])
   const [query, setQuery] = useState("")
   const [group, setGroup] = useState("all")
@@ -53,10 +69,23 @@ export function Docs() {
     void loadWiki().then(setItems)
   }, [])
 
+  const foundRules = useMemo(() => {
+    const ids = new Set<string>()
+    const pattern = /\b(?:pc:)?([ASPT]-[A-Za-z0-9_-]+)\b/g
+    for (const row of inventory) {
+      const blob = [row.title, row.detail, row.tags, row.vuln_id].join(" ")
+      for (const match of blob.matchAll(pattern)) ids.add(match[1])
+    }
+    return ids
+  }, [inventory])
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
-    return items.filter((item) => (group === "all" || item.g === group) && (!q || [item.id, item.title, item.text, item.family].join(" ").toLowerCase().includes(q)))
-  }, [group, items, query])
+    return items.filter((item) => {
+      if (item.g === "pingcastle" && (!item.id || !foundRules.has(item.id))) return false
+      return (group === "all" || item.g === group) && (!q || [item.id, item.title, item.text, item.family, item.what, item.impact, item.fix].join(" ").toLowerCase().includes(q))
+    })
+  }, [foundRules, group, items, query])
 
   const families = ["Устаревшее", "Привилегии", "Аномалии", "Доверия"]
   const docs = DOCS[lang]
@@ -91,12 +120,15 @@ export function Docs() {
             {["platform", "bloodhound"].filter((key) => group === "all" || group === key).map((key) => (
               <WikiBlock key={key} title={key === "platform" ? "Проверки платформы" : "BloodHound"} items={filtered.filter((item) => item.g === key)} onOpen={setCard} />
             ))}
+            {(group === "all" || group === "pingcastle") && !filtered.some((item) => item.g === "pingcastle") ? (
+              <p className="text-muted-foreground mt-3 text-sm">Правила PingCastle появятся после загрузки отчета и только по найденным проблемам.</p>
+            ) : null}
             {(group === "all" || group === "pingcastle") && filtered.some((item) => item.g === "pingcastle") ? (
               <Accordion type="single" collapsible>
                 <AccordionItem value="pc">
                   <AccordionTrigger>PingCastle · {filtered.filter((item) => item.g === "pingcastle").length}</AccordionTrigger>
                   <AccordionContent>
-                    <p className="mb-3">Индекс от 0 до 100: чем выше, тем хуже. Четыре раздела считаются отдельно, общий индекс — худший из них. В отчет платформы попадает правило, только если PingCastle дал ему баллы. 30 и выше — критический уровень, 15–29 — высокий, 5–14 — средний, меньше 5 — низкий.</p>
+                    <p className="mb-3">Здесь только те правила PingCastle, которые нашлись в загруженном отчете. Полный каталог из сотен проверок в справочник не выгружается. 30 баллов и выше — критический уровень, 15–29 — высокий, 5–14 — средний, меньше 5 — низкий.</p>
                     {families.map((family) => {
                       const part = filtered.filter((item) => item.g === "pingcastle" && item.family === family)
                       if (!part.length) return null
@@ -113,7 +145,10 @@ export function Docs() {
       <Dialog open={!!card} onOpenChange={(next) => { if (!next) setCard(null) }}>
         <DialogContent className="max-h-[85vh] overflow-auto sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>{card?.title}</DialogTitle>
+            <DialogTitle className="flex flex-wrap items-center gap-2">
+              {card?.title}
+              {card?.sev ? <span className={"rounded-full px-2 py-0.5 text-xs " + sevClass(card.sev)}>{SEV[card.sev] || card.sev}</span> : null}
+            </DialogTitle>
             <DialogDescription>{[card?.id, card?.family].filter(Boolean).join(" · ")}</DialogDescription>
           </DialogHeader>
           <section className="grid gap-1">
@@ -153,7 +188,10 @@ function WikiBlock({ title, items, onOpen }: { title: string; items: WikiItem[];
 function WikiCard({ item, onOpen }: { item: WikiItem; onOpen: (item: WikiItem) => void }) {
   return (
     <button type="button" className="hover:bg-muted/60 rounded-xl border p-3 text-left" onClick={() => onOpen(item)}>
-      <code className="text-muted-foreground text-xs">{item.id}</code>
+      <div className="flex items-center justify-between gap-2">
+        <code className="text-muted-foreground text-xs">{item.id}</code>
+        {item.sev ? <span className={"rounded-full px-2 py-0.5 text-[11px] " + sevClass(item.sev)}>{SEV[item.sev] || item.sev}</span> : null}
+      </div>
       <div className="font-medium">{item.title}</div>
       <p className="text-muted-foreground line-clamp-2 text-xs">{item.impact || item.text}</p>
     </button>
