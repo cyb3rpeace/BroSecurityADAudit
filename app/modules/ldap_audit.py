@@ -715,6 +715,108 @@ def scan_hardening_ldap(connection: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+_CLIENT_AUTH = "1.3.6.1.5.5.7.3.2"
+_SMART_CARD = "1.3.6.1.4.1.311.20.2.2"
+
+
+def _as_int(entry: Any, name: str) -> int:
+    try:
+        return int(_first(entry, name) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _as_list(entry: Any, name: str) -> list[str]:
+    attr = entry[name]
+    if attr is None or attr.value is None:
+        return []
+    value = attr.value
+    items = value if isinstance(value, list) else [value]
+    return [str(item) for item in items if item is not None]
+
+
+def scan_adcs_ldap(connection: dict[str, Any]) -> dict[str, Any]:
+    """Шаблоны из раздела конфигурации. Только флаги и EKU, без прав выпуска и без запросов в центр сертификации."""
+    secret = str(connection.get("password") or "")
+    try:
+        conn, _base = connect(connection)
+    except (LDAPException, OSError, RuntimeError) as exc:
+        text = str(exc).replace(secret, "") if secret else str(exc)
+        return {"ok": False, "findings": [], "score": None, "message": f"LDAP не открылся: {text}"[:500]}
+    findings: list[dict[str, Any]] = []
+    try:
+        config = _config_base(conn)
+        if not config:
+            return {"ok": False, "findings": [], "score": None, "message": "Контроллер не вернул раздел конфигурации."}
+        templates = "CN=Certificate Templates,CN=Public Key Services,CN=Services," + config
+        try:
+            conn.search(
+                templates,
+                "(objectClass=pKICertificateTemplate)",
+                search_scope=SUBTREE,
+                attributes=["cn", "displayName", "msPKI-Certificate-Name-Flag", "msPKI-Enrollment-Flag", "pKIExtendedKeyUsage"],
+                size_limit=400,
+            )
+        except LDAPException as exc:
+            text = str(exc).replace(secret, "") if secret else str(exc)
+            return {"ok": False, "findings": [], "score": None, "message": f"Шаблоны AD CS не прочитаны: {text}"[:500]}
+        description = str((conn.result or {}).get("description") or "")
+        if description == "noSuchObject":
+            return {
+                "ok": True,
+                "findings": [],
+                "score": None,
+                "message": "Контейнер шаблонов сертификатов не найден. В этом лесу служба AD CS не развернута либо контейнер недоступен для чтения.",
+            }
+        if description not in {"success", "sizeLimitExceeded"}:
+            detail = str((conn.result or {}).get("message") or description or "поиск не выполнен")
+            if secret:
+                detail = detail.replace(secret, "")
+            return {"ok": False, "findings": [], "score": None, "message": f"Шаблоны AD CS не прочитаны: {detail}"[:500]}
+        rows = list(conn.entries)
+        for entry in rows:
+            name_flag = _as_int(entry, "msPKI-Certificate-Name-Flag")
+            enroll_flag = _as_int(entry, "msPKI-Enrollment-Flag")
+            eku = _as_list(entry, "pKIExtendedKeyUsage")
+            enrollee_san = (name_flag & 1) == 1
+            pending = (enroll_flag & 2) == 2
+            auth = _CLIENT_AUTH in eku or _SMART_CARD in eku
+            if not (enrollee_san and auth and not pending):
+                continue
+            cn = str(_first(entry, "cn") or "template")
+            title = str(_first(entry, "displayName") or cn).replace("|", "/")
+            findings.append(
+                {
+                    "hostname": str(connection.get("host") or ""),
+                    "category": "AD CS",
+                    "title": f"Шаблон {title}: заявитель задает альтернативное имя",
+                    "severity": "high",
+                    "detail": (
+                        f"Шаблон {cn} одновременно разрешает имя субъекта от заявителя, "
+                        "содержит EKU проверки подлинности клиента и не требует согласования выпуска. "
+                        "Сузьте право Enroll и отключите поставку SAN заявителем."
+                    ),
+                    "tags": "compliance,adcs,module:ad_cs",
+                    "vuln_id": "adcs_enrollee_san",
+                }
+            )
+            if len(findings) >= 40:
+                break
+        if findings:
+            message = f"Рискованных шаблонов AD CS: {len(findings)}. Прочитано шаблонов по LDAP: {len(rows)}."
+        else:
+            message = (
+                "Шаблонов с комбинацией «SAN от заявителя + проверка подлинности клиента + автовыпуск» не найдено. "
+                f"Прочитано шаблонов по LDAP: {len(rows)}."
+            )
+        return {"ok": True, "findings": findings, "score": None, "message": message}
+    finally:
+        try:
+            conn.unbind()
+        except LDAPException:
+            pass
+
+
 def list_computer_names(connection: dict[str, Any], limit: int = 2000) -> list[str]:
     """Имена включенных компьютеров домена. Пароли и хеши не читаются."""
     conn, base = connect(connection)

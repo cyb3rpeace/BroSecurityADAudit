@@ -13,7 +13,7 @@ import type { ScanRow } from "@/lib/types"
 import { useApp } from "@/app-state"
 
 const MODULES = [
-  ["ad_cs", "AD CS · Windows"],
+  ["ad_cs", "AD CS · LDAP"],
   ["software_audit", "Аудит ПО · Windows"],
   ["gpp_passwords", "Пароли в GPO · Windows"],
   ["dc_hardening", "Харденинг · LDAPS или Windows"],

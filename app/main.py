@@ -55,7 +55,7 @@ from app.database import (
 )
 from app.modules.bloodhound import ingest_sharphound_zip, run_bloodhound
 from app.modules.dc_hardening import scan_hardening
-from app.modules.ldap_audit import list_computer_names, probe_directory, scan_hardening_ldap, scan_hygiene_ldap, scan_trusts_ldap
+from app.modules.ldap_audit import list_computer_names, probe_directory, scan_adcs_ldap, scan_hardening_ldap, scan_hygiene_ldap, scan_trusts_ldap
 from app.modules.mitre import card as mitre_card
 from app.modules.mitre import tactics_of
 from app.modules.protocols import scan_protocols_ldap, scan_protocols_windows
@@ -63,7 +63,7 @@ from app.modules.notifier_mail import send_report
 from app.modules.notifier_tg import send_summary
 from app.modules.pingcastle import parse_pingcastle_xml, run_pingcastle
 from app.modules.posture import scan_hygiene, scan_time, scan_trusts
-from app.modules.software_scan import repair_caption, scan_adcs, scan_gpp, scan_software, validate_host
+from app.modules.software_scan import repair_caption, scan_gpp, scan_software, validate_host
 
 load_dotenv(BASE_DIR / ".env")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -526,7 +526,7 @@ def windows_required(module: str) -> dict[str, Any]:
         "protocols": "Реестр SMB, LLMNR, NetBIOS, WDigest и подписи LDAP читается на контроллере по WinRM. Типы шифрования Kerberos при этом уже читаются по LDAP.",
         "software_audit": "Список программ читается из реестра Windows. Нужен WinRM или SSH. Одного LDAPS недостаточно.",
         "gpp_passwords": "SYSVOL читается скриптом на контроллере. Нужен WinRM или SSH. Значение cpassword не расшифровывается.",
-        "ad_cs": "Шаблоны AD CS читаются на сервере сертификации по WinRM. Одного LDAPS недостаточно.",
+        "ad_cs": "Шаблоны AD CS читаются по LDAP из раздела конфигурации. WinRM для этой проверки не нужен.",
         "time_sync": "Сдвиг часов снимается командой w32tm на контроллере. Нужен WinRM или SSH.",
     }
     return {
@@ -927,6 +927,8 @@ def execute_scan(scan_id: int) -> None:
                     else:
                         bits.append("Реестр контроллера не читался. Для SMB, LLMNR, NetBIOS и WDigest нужен WinRM именно на контроллер. PingCastle при этом запускается с другого Windows-хоста.")
                     result = {"ok": bool(ldap_part.get("ok") or findings), "findings": findings, "score": None, "message": " ".join(bits)}
+                elif module == "ad_cs":
+                    result = scan_adcs_ldap(connection)
                 elif module in {"trusts", "baseline_hygiene"}:
                     result = scan_trusts_ldap(connection) if module == "trusts" else scan_hygiene_ldap(connection)
                 elif module == "dc_hardening" and not dc_windows:
@@ -956,8 +958,6 @@ def execute_scan(scan_id: int) -> None:
                             result["message"] = catalog_note + str(result.get("message") or "")
                     elif module == "gpp_passwords":
                         result = scan_gpp(remote_dc)
-                    elif module == "ad_cs":
-                        result = scan_adcs(remote_dc)
                     elif module == "dc_hardening":
                         result = scan_hardening(remote_dc)
                     elif module == "trusts":
