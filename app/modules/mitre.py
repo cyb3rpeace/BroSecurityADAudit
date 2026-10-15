@@ -1,0 +1,76 @@
+"""Сопоставление находок с MITRE ATT&CK. Только номера и защитные действия, без шагов эксплуатации."""
+
+from __future__ import annotations
+
+_DEFAULT = {
+    "id": "T1087.002",
+    "tactic": "Discovery",
+    "name": "Account Discovery: Domain Account",
+    "impact": "Отклонение расширяет поверхность домена. Пока оно открыто, защитные контроли работают хуже, чем задумано.",
+    "closure": "Устраните причину штатной настройкой домена и повторите проверку. Карточка не содержит шагов атаки.",
+}
+
+CATALOG: dict[str, dict[str, str]] = {
+    "active_smbv1": {"id": "T1210", "tactic": "Lateral Movement", "name": "Exploitation of Remote Services", "impact": "SMBv1 — устаревший протокол общего доступа. На нем держатся старые ошибки удаленного выполнения, и современная подпись SMB его не спасает.", "closure": "Выключите серверный и клиентский SMBv1 политикой и перезагрузите узел в согласованное окно."},
+    "smb_signing_off": {"id": "T1557", "tactic": "Collection", "name": "Adversary-in-the-Middle", "impact": "Без обязательной подписи SMB сессию к файловому серверу можно подменить в локальной сети.", "closure": "Включите RequireSecuritySignature для сервера и клиента SMB через групповую политику."},
+    "llmnr_enabled": {"id": "T1557.001", "tactic": "Collection", "name": "LLMNR/NBT-NS Poisoning", "impact": "LLMNR отвечает на имена, которых нет в DNS. В локальном сегменте это приводит к перехвату попытки входа.", "closure": "Отключите LLMNR политикой DNS Client: EnableMulticast = 0."},
+    "netbios_enabled": {"id": "T1557.001", "tactic": "Collection", "name": "LLMNR/NBT-NS Poisoning", "impact": "NetBIOS поверх TCP/IP дублирует слабый канал разрешения имен рядом с LLMNR.", "closure": "На адаптерах выставьте NetbiosOptions = 2 и закрепите это политикой."},
+    "wpad_enabled": {"id": "T1557", "tactic": "Collection", "name": "Adversary-in-the-Middle", "impact": "Автопоиск прокси WPAD позволяет подсунуть узлу чужой прокси в локальной сети.", "closure": "Отключите автообнаружение WPAD и задайте прокси явно, если он нужен."},
+    "wdigest_clear": {"id": "T1003.001", "tactic": "Credential Access", "name": "OS Credential Dumping: LSASS Memory", "impact": "WDigest оставляет пароль в памяти процесса входа в открытом виде.", "closure": "Установите UseLogonCredential = 0 и перезайдите в систему после применения политики."},
+    "ntlmv1_allowed": {"id": "T1557", "tactic": "Collection", "name": "Adversary-in-the-Middle", "impact": "NTLMv1 и слабые уровни LmCompatibilityLevel принимают устаревший ответ, который в современной сети не нужен.", "closure": "Поднимите LmCompatibilityLevel до 5: только NTLMv2, отказ от LM и NTLMv1."},
+    "ldap_signing_not_required": {"id": "T1557", "tactic": "Collection", "name": "Adversary-in-the-Middle", "impact": "Неподписанный LDAP позволяет подменить ответы контроллера в сети между клиентом и доменом.", "closure": "LDAPServerIntegrity = 2 на контроллерах, затем потребуйте подпись на клиентах."},
+    "ldap_channel_binding": {"id": "T1557", "tactic": "Collection", "name": "Adversary-in-the-Middle", "impact": "Без привязки канала LDAPS проще переслать сессию на другой узел.", "closure": "Включите LdapEnforceChannelBinding в режиме 2 после проверки приложений."},
+    "null_session": {"id": "T1135", "tactic": "Discovery", "name": "Network Share Discovery", "impact": "Анонимный сеанс позволяет перечислить общие ресурсы и учетные записи без пароля.", "closure": "RestrictAnonymous и RestrictAnonymousSAM поставьте в значение, запрещающее анонимный перебор."},
+    "powershell_v2": {"id": "T1059.001", "tactic": "Execution", "name": "Command and Scripting Interpreter: PowerShell", "impact": "PowerShell 2.0 не пишет современные журналы сценариев и обходит часть контроля.", "closure": "Удалите компонент PowerShell 2.0 и оставьте только актуальную версию."},
+    "tls10_enabled": {"id": "T1557", "tactic": "Collection", "name": "Adversary-in-the-Middle", "impact": "TLS 1.0 и 1.1 считаются устаревшими и слабее актуальных наборов шифров.", "closure": "Отключите TLS 1.0 и 1.1 на сервере и клиенте Schannel, оставьте TLS 1.2 и новее."},
+    "rc4_only": {"id": "T1558", "tactic": "Credential Access", "name": "Steal or Forge Kerberos Tickets", "impact": "Учетная запись соглашается на RC4 и не предлагает AES. Это слабее, чем AES для Kerberos.", "closure": "Включите AES128 и AES256 на учетной записи и снимите опору только на RC4."},
+    "des_enabled": {"id": "T1558", "tactic": "Credential Access", "name": "Steal or Forge Kerberos Tickets", "impact": "DES для Kerberos устарел и не должен оставаться разрешенным типом шифрования.", "closure": "Снимите флаги DES в msDS-SupportedEncryptionTypes и в политике Kerberos."},
+    "print_spooler_on_dc": {"id": "T1210", "tactic": "Lateral Movement", "name": "Exploitation of Remote Services", "impact": "Служба печати на контроллере дает лишнюю точку входа туда, где лежат секреты домена.", "closure": "Остановите и отключите Spooler на контроллерах. Печать оставьте на отдельном сервере."},
+    "kerberoasting": {"id": "T1558.003", "tactic": "Credential Access", "name": "Kerberoasting", "impact": "SPN на обычной учетной записи делает ее пароль целью офлайн-подбора. Платформа билет не запрашивает.", "closure": "Переведите службу на gMSA и уберите SPN со старой записи."},
+    "asrep_preauth": {"id": "T1558.004", "tactic": "Credential Access", "name": "AS-REP Roasting", "impact": "Без предварительной проверки подлинности пароль учетной записи проще проверять офлайн.", "closure": "Включите предварительную проверку подлинности Kerberos."},
+    "krbtgt_old": {"id": "T1558.001", "tactic": "Credential Access", "name": "Golden Ticket", "impact": "Старый пароль krbtgt дольше сохраняет силу ранее выпущенных билетов домена.", "closure": "Дважды смените пароль krbtgt штатной процедурой с паузой не меньше 10 часов."},
+    "unconstrained_delegation": {"id": "T1558", "tactic": "Credential Access", "name": "Steal or Forge Kerberos Tickets", "impact": "Неограниченное делегирование оставляет на рядовом сервере билеты других пользователей.", "closure": "Снимите флаг со всех узлов, кроме контроллеров домена."},
+    "gpp_password": {"id": "T1552.006", "tactic": "Credential Access", "name": "Group Policy Preferences", "impact": "Пароль в предпочтении GPO лежит в SYSVOL в обратимом виде. Платформа его не расшифровывает.", "closure": "Удалите узлы cpassword и замените секрет на LAPS или gMSA."},
+    "adcs_enrollee_san": {"id": "T1649", "tactic": "Credential Access", "name": "Steal or Forge Authentication Certificates", "impact": "Шаблон, где заявитель сам задает имя субъекта, позволяет получить сертификат чужого имени.", "closure": "Запретите SAN от заявителя или включите обязательное согласование выпуска."},
+    "trust_sid_filter": {"id": "T1134.005", "tactic": "Privilege Escalation", "name": "SID-History Injection", "impact": "Доверие без фильтрации SID принимает идентификаторы чужого домена, включая привилегированные.", "closure": "Включите фильтрацию SID и, где уместно, выборочную проверку подлинности."},
+    "ordinary_privileged": {"id": "T1078.002", "tactic": "Privilege Escalation", "name": "Valid Accounts: Domain Accounts", "impact": "Обычная рабочая запись в привилегированной группе совмещает повседневный вход и права домена.", "closure": "Уберите запись из группы и заведите отдельную административную учетную запись."},
+    "stale_password": {"id": "T1078.002", "tactic": "Defense Evasion", "name": "Valid Accounts: Domain Accounts", "impact": "Пароль старше 90 дней при живом входе дольше остается пригодным, если он когда-либо утечет.", "closure": "Смените пароль и включите срок действия для этой записи."},
+    "inactive_stale": {"id": "T1078.002", "tactic": "Defense Evasion", "name": "Valid Accounts: Domain Accounts", "impact": "Молчащая запись со старым паролем — готовый вход, за которым никто не следит.", "closure": "Отключите запись после проверки, что на нее не завязана служба."},
+    "guest_enabled": {"id": "T1078", "tactic": "Initial Access", "name": "Valid Accounts", "impact": "Включенная запись Guest открывает анонимный путь в домен.", "closure": "Отключите встроенную учетную запись Guest."},
+    "obsolete_os": {"id": "T1210", "tactic": "Lateral Movement", "name": "Exploitation of Remote Services", "impact": "Система без обновлений безопасности остается в сети с уже известными ошибками.", "closure": "Выведите узел из домена или обновите его до поддерживаемой версии."},
+    "time_skew": {"id": "T1558", "tactic": "Credential Access", "name": "Steal or Forge Kerberos Tickets", "impact": "Сдвиг часов больше пяти минут ломает выпуск билетов Kerberos и маскирует сбои аутентификации.", "closure": "Верните контроллер к источнику времени домена командой w32tm /resync. Порог Kerberos не ослабляйте."},
+    "anydesk_detected": {"id": "T1219", "tactic": "Command and Control", "name": "Remote Access Software", "impact": "Несогласованный удаленный доступ обходит корпоративный канал администрирования.", "closure": "Остановите продукт, удалите его и запретите установку политикой."},
+    "teamviewer_detected": {"id": "T1219", "tactic": "Command and Control", "name": "Remote Access Software", "impact": "Несогласованный удаленный доступ обходит корпоративный канал администрирования.", "closure": "Остановите продукт, удалите его и запретите установку политикой."},
+    "rustdesk_detected": {"id": "T1219", "tactic": "Command and Control", "name": "Remote Access Software", "impact": "Несогласованный удаленный доступ обходит корпоративный канал администрирования.", "closure": "Остановите продукт, удалите его и запретите установку политикой."},
+    "vnc_detected": {"id": "T1021.005", "tactic": "Lateral Movement", "name": "Remote Services: VNC", "impact": "VNC часто работает со слабым паролем и без журнала корпоративного доступа.", "closure": "Удалите VNC и оставьте только утвержденное средство удаленного доступа."},
+    "vpn_unauthorized": {"id": "T1572", "tactic": "Command and Control", "name": "Protocol Tunneling", "impact": "Личный VPN уводит трафик мимо корпоративного контроля.", "closure": "Удалите клиент и запретите несогласованные туннели политикой."},
+    "laps_missing": {"id": "T1078.003", "tactic": "Privilege Escalation", "name": "Valid Accounts: Local Accounts", "impact": "Без LAPS пароль локального администратора часто одинаковый на многих узлах.", "closure": "Расширьте схему Windows LAPS и включите политику смены пароля. Сам пароль платформа не читает."},
+    "priv_password_never_expires": {"id": "T1078.002", "tactic": "Privilege Escalation", "name": "Valid Accounts: Domain Accounts", "impact": "Привилегированный пароль без срока живет дольше, чем допустимо для административного входа.", "closure": "Снимите флаг «пароль не истекает» и смените пароль."},
+    "not_in_protected_users": {"id": "T1558", "tactic": "Credential Access", "name": "Steal or Forge Kerberos Tickets", "impact": "Интерактивный администратор вне Protected Users дольше сохраняет слабые способы входа.", "closure": "Добавьте в Protected Users только интерактивных администраторов, не сервисные записи."},
+    "honeytoken": {"id": "T1078", "tactic": "Discovery", "name": "Valid Accounts", "impact": "Ловушка сама по себе не уязвимость: обращение к ней — сигнал, что кто-то обходит каталог.", "closure": "Настройте оповещение на вход и чтение этой записи. Прав ей не давайте."},
+}
+
+
+def card(vuln_id: str) -> dict[str, str]:
+    item = CATALOG.get(vuln_id or "")
+    if item:
+        return item
+    if (vuln_id or "").startswith("pc:"):
+        return {
+            "id": "T1087.002",
+            "tactic": "Discovery",
+            "name": "Domain configuration weakness",
+            "impact": "Правило PingCastle показывает слабость зрелости домена. Само по себе оно не описывает атаку.",
+            "closure": "Закройте причину из текста правила и повторите PingCastle.",
+        }
+    return dict(_DEFAULT)
+
+
+def tactics_of(rows: list) -> list[dict[str, object]]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        if getattr(row, "severity", "") == "info":
+            continue
+        tactic = card(getattr(row, "vuln_id", "")).get("tactic") or "Discovery"
+        counts[tactic] = counts.get(tactic, 0) + 1
+    return [{"tactic": name, "count": counts[name]} for name in sorted(counts, key=lambda key: (-counts[key], key))]

@@ -1,0 +1,1526 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>BroSec Audit AD</title>
+  <link rel="icon" href="/static/logo.png"/>
+  <style>
+    :root, html[data-theme="dark"] {
+      --bg: #09090b;
+      --side: #0c0c0e;
+      --card: #111113;
+      --card-2: #18181b;
+      --line: #27272a;
+      --text: #fafafa;
+      --muted: #a1a1aa;
+      --faint: #71717a;
+      --nav: #27272a;
+      --crit: #ff3b5c;
+      --high: #ff9f1a;
+      --mid: #7c5cff;
+      --low: #2ee59d;
+      --cyan: #d4d4d8;
+      --magenta: #e4e4e7;
+      --glow: none;
+      --input: #09090b;
+      --chip: #18181b;
+      --shadow: none;
+      --btn: #fafafa;
+      --btn-text: #09090b;
+    }
+    html[data-theme="light"] {
+      --bg: #f3f6fb;
+      --side: #ffffff;
+      --card: #ffffff;
+      --card-2: #f8fafc;
+      --line: #e4eaf3;
+      --text: #1c2744;
+      --muted: #66718c;
+      --faint: #8b95ab;
+      --nav: #e8f0ff;
+      --crit: #ef4444;
+      --high: #f59e0b;
+      --mid: #3b82f6;
+      --low: #10b981;
+      --cyan: #14b8a6;
+      --magenta: #2563eb;
+      --glow: none;
+      --input: #ffffff;
+      --chip: #f4f7fb;
+      --shadow: 0 8px 24px rgba(28, 39, 68, .06);
+      --btn: #2563eb;
+      --btn-text: #ffffff;
+    }
+    html[data-theme="cyber"] {
+      --bg: #07061a;
+      --side: #0c0820;
+      --card: #14102a;
+      --card-2: #100c22;
+      --line: rgba(176, 92, 255, .42);
+      --text: #f4f7ff;
+      --muted: #b9c0dc;
+      --faint: #8e98b8;
+      --nav: rgba(225, 75, 255, .16);
+      --crit: #ff3b5c;
+      --high: #ff9f1a;
+      --mid: #7c5cff;
+      --low: #2ee59d;
+      --cyan: #3ecbff;
+      --magenta: #e14bff;
+      --glow: 0 0 22px rgba(180, 76, 255, .18);
+      --input: #0c1024;
+      --chip: rgba(255,255,255,.04);
+      --shadow: none;
+      --btn: linear-gradient(90deg, #c026d3, #7c3aed 55%, #0891b2);
+      --btn-text: #ffffff;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--text); font-family: "Segoe UI", sans-serif; }
+    button, input, select, textarea { font: inherit; color: inherit; }
+    button { cursor: pointer; }
+    .hidden { display: none !important; }
+    .login { min-height: 100vh; display: grid; place-items: center; background: var(--bg); }
+    html[data-theme="light"] .login { background: linear-gradient(180deg, #eef4ff, #f7f9fc); }
+    html[data-theme="cyber"] .login {
+      background:
+        radial-gradient(520px 280px at 15% 10%, rgba(225,75,255,.22), transparent 60%),
+        radial-gradient(480px 280px at 85% 90%, rgba(62,203,255,.16), transparent 60%),
+        var(--bg);
+    }
+    .login-card {
+      width: min(420px, calc(100% - 32px)); background: var(--card); border: 1px solid var(--line);
+      border-radius: 22px; padding: 32px 28px; text-align: center; box-shadow: var(--glow), var(--shadow);
+    }
+    .login-card img, .brand img { width: 52px; height: 52px; border-radius: 16px; object-fit: cover; }
+    .login-card h1 { margin: 12px 0 4px; font-size: 22px; }
+    .login-card p { margin: 0 0 16px; color: var(--muted); }
+    input, select, textarea {
+      width: 100%; background: var(--input); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; outline: none;
+    }
+    .login-card input { margin-bottom: 10px; }
+    .btn { border: 0; border-radius: 12px; padding: 10px 14px; background: var(--btn); color: var(--btn-text); font-weight: 650; }
+    .btn.ghost { background: transparent; border: 1px solid var(--line); color: var(--text); font-weight: 500; }
+    .menu-btn { display: none; width: 40px; height: 40px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); }
+    .scrim { display: none; }
+    .err { color: var(--crit); min-height: 18px; font-size: 13px; }
+    .shell { display: grid; grid-template-columns: 228px 1fr; min-height: 100vh; }
+    aside {
+      background: var(--side); border-right: 1px solid var(--line); padding: 16px 12px; position: sticky; top: 0; height: 100vh;
+      display: flex; flex-direction: column; overflow: hidden;
+    }
+    .nav-scroll { overflow: auto; flex: 1; min-height: 0; }
+    .group { margin: 14px 8px 4px; color: var(--faint); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; }
+    .brand { display: flex; gap: 10px; align-items: center; padding: 4px 8px 16px; }
+    .brand strong { display: block; font-size: 14px; }
+    .brand span { color: var(--muted); font-size: 12px; }
+    .nav-btn {
+      width: 100%; display: flex; gap: 10px; align-items: center; background: transparent; border: 0; color: var(--muted);
+      border-radius: 12px; padding: 10px 12px; margin: 2px 0; text-align: left;
+    }
+    .nav-btn svg { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 1.7; flex: 0 0 auto; }
+    .nav-btn.active { background: var(--nav); color: var(--text); }
+    html[data-theme="cyber"] .nav-btn.active { box-shadow: var(--glow); }
+    .main { min-width: 0; padding: 16px 22px 40px; background: var(--bg); }
+    html[data-theme="cyber"] .main {
+      background:
+        radial-gradient(720px 280px at 100% -8%, rgba(225,75,255,.14), transparent 55%),
+        radial-gradient(560px 240px at 0% 0%, rgba(62,203,255,.08), transparent 50%),
+        var(--bg);
+    }
+    .themes { display: flex; gap: 4px; flex: 0 0 auto; }
+    .themes button { border: 1px solid var(--line); background: transparent; color: var(--muted); border-radius: 8px; padding: 6px 8px; font-size: 12px; }
+    .themes button.on { background: var(--nav); color: var(--text); }
+    header { display: flex; gap: 8px; align-items: center; margin-bottom: 16px; flex-wrap: nowrap; }
+    .search { flex: 1 1 auto; min-width: 0; border-radius: 999px; background: var(--card); }
+    .who { max-width: 9rem; overflow: hidden; text-overflow: ellipsis; }
+    #company-select { flex: 0 1 200px; width: auto; }
+    .icon-btn {
+      width: 40px; height: 40px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); color: var(--text);
+    }
+    .who { color: var(--muted); font-size: 13px; white-space: nowrap; }
+    h1 { margin: 0 0 4px; font-size: 26px; font-weight: 650; }
+    .sub { margin: 0 0 14px; color: var(--muted); }
+    .banner {
+      display: flex; justify-content: space-between; gap: 12px; align-items: center;
+      border: 1px solid rgba(255,159,26,.45); background: rgba(255,159,26,.08); color: #ffd7a1;
+      border-radius: 12px; padding: 10px 12px; margin-bottom: 14px;
+    }
+    html[data-theme="light"] .banner { color: #9a6700; background: #fff7e8; }
+    .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 14px; }
+    .kpi {
+      background: var(--card); border-radius: 16px; min-height: 112px; padding: 14px 16px;
+      display: grid; grid-template-columns: 42px 1fr; gap: 10px; align-items: center; box-shadow: var(--shadow);
+    }
+    .kpi.crit { border: 1px solid rgba(255,59,92,.75); box-shadow: 0 0 18px rgba(255,59,92,.16), var(--shadow); }
+    .kpi.high { border: 1px solid rgba(255,159,26,.75); box-shadow: 0 0 18px rgba(255,159,26,.14), var(--shadow); }
+    .kpi.cyan { border: 1px solid rgba(62,203,255,.75); box-shadow: 0 0 18px rgba(62,203,255,.14), var(--shadow); }
+    .kpi.mid { border: 1px solid rgba(180,76,255,.75); box-shadow: 0 0 18px rgba(180,76,255,.16), var(--shadow); }
+    html:not([data-theme="cyber"]) .kpi.crit, html:not([data-theme="cyber"]) .kpi.high, html:not([data-theme="cyber"]) .kpi.cyan, html:not([data-theme="cyber"]) .kpi.mid { box-shadow: var(--shadow); }
+    .ico { width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; }
+    .ico svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 1.8; }
+    .ico.crit { color: var(--crit); background: rgba(255,59,92,.14); }
+    .ico.high { color: var(--high); background: rgba(255,159,26,.14); }
+    .ico.cyan { color: var(--cyan); background: rgba(62,203,255,.14); }
+    .ico.mid { color: var(--mid); background: rgba(124,92,255,.16); }
+    .kpi .label { color: var(--muted); font-size: 13px; }
+    .kpi .num { font-size: 30px; font-weight: 700; line-height: 1.05; }
+    .delta { font-size: 12px; }
+    .delta.up { color: var(--crit); }
+    .delta.down { color: var(--low); }
+    .grid-2 { display: grid; grid-template-columns: 1.15fr 1fr; gap: 14px; margin-bottom: 14px; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 16px; box-shadow: var(--shadow); overflow: auto; }
+    html[data-theme="cyber"] .card { box-shadow: 0 0 28px rgba(120, 60, 220, .14); }
+    .card h2 { margin: 0 0 12px; font-size: 16px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .chart-box { position: relative; height: 240px; }
+    .chart-box canvas { width: 100% !important; height: 240px !important; }
+    .chart-box.tall { height: 300px; }
+    .chart-box.tall canvas { height: 300px !important; }
+    .chart-card { border-radius: 16px; }
+    .chart-card h2 { letter-spacing: -.01em; }
+    .legend button { border: 1px solid var(--line); background: var(--chip); color: var(--text); border-radius: 999px; padding: 6px 10px; }
+    .legend button.on { border-color: var(--magenta); background: rgba(180, 76, 255, .22); }
+    .wiki-k { margin: 12px 0 4px; color: var(--cyan); font-size: 12px; letter-spacing: .04em; text-transform: uppercase; }
+    .wiki-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 12px; }
+    .wiki-table td { font-size: 13px; line-height: 1.45; }
+    .wiki-id { font-family: Consolas, ui-monospace, monospace; color: var(--cyan); white-space: nowrap; width: 1%; }
+    details.acc.tight summary { padding: 10px 0; }
+    .wiki pre, details.acc pre { white-space: pre-wrap; background: var(--card-2); border: 1px solid var(--line); border-radius: 12px; padding: 12px; overflow: auto; }
+    .donut-wrap { position: relative; width: 220px; height: 220px; margin: 0 auto; }
+    .donut-wrap canvas { width: 220px !important; height: 220px !important; }
+    .dist { display: block; }
+    .legend.side { margin-top: 4px; }
+    .swatch { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+    .swatch.line { background: var(--magenta); box-shadow: 0 0 8px var(--magenta); }
+    html[data-theme="light"] .swatch.line { background: #14b8a6; box-shadow: none; }
+    .donut-center { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; pointer-events: none; }
+    .donut-center b { font-size: 28px; display: block; line-height: 1; }
+    .donut-center span, .muted { color: var(--muted); font-size: 12px; }
+    .donut-center span { font-size: 11px; line-height: 1.1; }
+    .legend { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-top: 8px; color: var(--muted); font-size: 12px; }
+    table { width: 100%; border-collapse: collapse; }
+    th { text-align: left; color: var(--muted); font-weight: 500; font-size: 12px; padding: 8px; }
+    td { padding: 10px 8px; border-top: 1px solid var(--line); vertical-align: top; font-size: 14px; }
+    tr.clickable { cursor: pointer; }
+    tr.clickable:hover td { background: var(--chip); }
+    .pill { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 3px 9px; font-size: 12px; }
+    .pill i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+    .sev-critical { color: #ffd0d8; background: rgba(255,59,92,.16); }
+    .sev-high { color: #ffe1b5; background: rgba(255,159,26,.16); }
+    .sev-medium { color: #ddd6fe; background: rgba(124,92,255,.18); }
+    .sev-low, .sev-info { color: #c9ffe8; background: rgba(46,229,157,.12); }
+    html[data-theme="light"] .sev-critical { color: #b91c1c; background: #fee2e2; }
+    html[data-theme="light"] .sev-high { color: #b45309; background: #ffedd5; }
+    html[data-theme="light"] .sev-medium { color: #1d4ed8; background: #dbeafe; }
+    html[data-theme="light"] .sev-low, html[data-theme="light"] .sev-info { color: #047857; background: #d1fae5; }
+    .st-open { color: #93c5fd; }
+    .st-investigating { color: #fbbf24; }
+    .st-closed { color: var(--low); }
+    .filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+    .chip { border: 1px solid var(--line); background: var(--chip); color: var(--text); border-radius: 999px; padding: 6px 10px; }
+    .chip.on { border-color: var(--line); color: var(--text); background: var(--nav); }
+    html[data-theme="cyber"] .chip.on { border-color: var(--magenta); color: #fff; background: rgba(180,76,255,.25); }
+    html[data-theme="light"] .chip.on { color: #1d4ed8; background: #e8f0ff; border-color: #bfdbfe; }
+    .split { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .hit { border-radius: 14px; padding: 12px 14px; margin-bottom: 8px; background: var(--card-2); border: 1px solid var(--line); }
+    .hit.critical { border-left: 4px solid var(--crit); }
+    .hit.high { border-left: 4px solid var(--high); }
+    .hit.medium { border-left: 4px solid var(--mid); }
+    .hit.low, .hit.info { border-left: 4px solid var(--low); }
+    .doc h3 { margin: 0 0 8px; font-size: 15px; }
+    .doc p, .doc li { color: var(--text); line-height: 1.45; }
+    .doc ul { margin: 4px 0 0; padding-left: 18px; }
+    .doc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .doc-card { background: var(--card-2); border: 1px solid var(--line); border-radius: 16px; padding: 14px 16px; }
+    .doc-card .tag { display: inline-block; margin-bottom: 8px; border-radius: 999px; padding: 2px 8px; font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--cyan); border: 1px solid var(--line); }
+    .flow { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 0 0 14px; }
+    .flow article { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 14px; box-shadow: var(--glow); }
+    .flow b { display: block; margin-bottom: 6px; }
+    .flow p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.45; }
+    .doc-tools { display: flex; gap: 8px; margin: 0 0 12px; }
+    details.acc { background: var(--card); border: 1px solid var(--line); border-radius: 16px; margin: 0 0 10px; padding: 0 16px; }
+    details.acc summary { cursor: pointer; padding: 14px 0; font-weight: 650; list-style: none; }
+    details.acc summary::-webkit-details-marker { display: none; }
+    details.acc summary:before { content: "▸ "; color: var(--magenta); }
+    details.acc[open] summary:before { content: "▾ "; }
+    details.acc[open] { box-shadow: var(--glow); }
+    details.acc p, details.acc li { line-height: 1.5; }
+    .mitre { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 14px; }
+    .mitre button { border-radius: 999px; }
+    .checks em { font-style: normal; color: var(--muted); font-size: 12px; }
+    .modal { position: fixed; inset: 0; background: rgba(4,6,16,.72); display: grid; place-items: center; z-index: 30; padding: 16px; }
+    .modal .card { width: min(820px, 100%); max-height: 88vh; overflow: auto; }
+    .steps { display: flex; gap: 6px; margin-bottom: 10px; }
+    .steps span { height: 4px; flex: 1; border-radius: 99px; background: var(--line); }
+    .steps span.on { background: var(--magenta); }
+    pre, .log { white-space: pre-wrap; background: var(--card-2); border-radius: 12px; padding: 12px; font-size: 12px; }
+    .checks { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; }
+    #ai-fab {
+      position: fixed; right: 22px; bottom: 22px; z-index: 15; width: 56px; height: 56px; border-radius: 50%; border: 0; color: #fff; font-weight: 700;
+      background: radial-gradient(circle at 30% 30%, #e14bff, #7c3aed 60%, #0891b2); box-shadow: 0 0 24px rgba(225,75,255,.4);
+    }
+    #ai-panel { position: fixed; right: 22px; bottom: 88px; width: min(420px, calc(100% - 24px)); height: 460px; display: none; flex-direction: column; z-index: 15; }
+    #ai-panel.open { display: flex; }
+    #ai-log { flex: 1; overflow: auto; }
+    .bubble { margin: 8px 0; padding: 8px 10px; border-radius: 12px; background: var(--card-2); }
+    .bubble.user { background: rgba(180,76,255,.2); }
+    .drop { margin-top: 8px; border: 1px dashed var(--line); border-radius: 12px; min-height: 96px; display: grid; place-items: center; text-align: center; color: var(--muted); background: var(--card-2); padding: 12px; }
+    pre { overflow: auto; }
+    @media (max-width: 1100px) {
+      .shell { grid-template-columns: 1fr; }
+      .menu-btn { display: grid; place-items: center; }
+      aside {
+        position: fixed; z-index: 40; top: 0; left: 0; width: min(280px, 88vw); height: 100vh; height: 100dvh;
+        transform: translateX(-105%); transition: transform .18s ease; box-shadow: var(--shadow);
+      }
+      aside.open { transform: none; }
+      .scrim { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 35; }
+      .scrim.on { display: block; }
+      header { flex-wrap: wrap; }
+      .search { flex: 1 1 180px; }
+      .kpis, .split, .checks, .doc-grid { grid-template-columns: 1fr 1fr; }
+      .grid-2, .flow { grid-template-columns: 1fr; }
+      .chart-box, .chart-box.tall { height: 220px; }
+      .chart-box canvas, .chart-box.tall canvas { height: 220px !important; }
+    }
+    @media (max-width: 720px) {
+      .main { padding: 12px 12px 88px; }
+      h1 { font-size: 22px; }
+      .kpis, .split, .checks, .doc-grid, .flow { grid-template-columns: 1fr; }
+      .kpi { min-height: 88px; }
+      .kpi .num { font-size: 24px; }
+      .who { display: none; }
+      #company-select, #lang { flex: 1 1 120px; }
+      .themes { width: 100%; }
+      .themes button { flex: 1; }
+      .donut-wrap, .donut-wrap canvas { width: 180px !important; height: 180px !important; }
+      #ai-fab { right: 12px; bottom: 12px; }
+      #ai-panel { right: 12px; bottom: 76px; height: min(460px, calc(100vh - 120px)); width: min(420px, calc(100% - 16px)); }
+      .banner, .doc-tools { flex-direction: column; align-items: stretch; }
+      .filters { flex-wrap: wrap; }
+      .modal .card { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <div id="login" class="login">
+    <form id="login-form" class="login-card">
+      <img src="/static/logo.png" alt="BroSec"/>
+      <h1>BroSec Audit AD</h1>
+      <p data-i18n="login.sub">Аудит Active Directory</p>
+      <input id="login-user" autocomplete="username" data-i18n-ph="login.user" placeholder="Логин" required/>
+      <input id="login-pass" type="password" autocomplete="current-password" data-i18n-ph="login.pass" placeholder="Пароль" required/>
+      <button class="btn" type="submit" data-i18n="login.in">Войти</button>
+      <div id="login-error" class="err"></div>
+    </form>
+  </div>
+
+  <div id="app" class="shell hidden">
+    <aside id="side">
+      <div class="brand"><img src="/static/logo.png" alt=""/><div><strong>BroSec</strong><span>Audit AD</span></div></div>
+      <div class="nav-scroll">
+        <div class="group" data-i18n="nav.g.overview">Обзор</div>
+        <button class="nav-btn active" data-view="overview" type="button"><svg viewBox="0 0 24 24"><path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1z"/></svg><span data-i18n="nav.overview">Обзор</span></button>
+        <button class="nav-btn" data-view="incidents" type="button"><svg viewBox="0 0 24 24"><path d="M12 3 3 19h18z"/><path d="M12 9v5M12 17h.01"/></svg><span data-i18n="nav.incidents">Инциденты</span></button>
+        <button class="nav-btn" data-view="accounts" type="button"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3"/><path d="M5 19c1.5-3 3.5-4 7-4s5.5 1 7 4"/></svg><span data-i18n="nav.accounts">Учетные записи</span></button>
+        <button class="nav-btn" data-view="paths" type="button"><svg viewBox="0 0 24 24"><path d="M7 7h10M7 12h10M7 17h6"/></svg><span data-i18n="nav.paths">Пути атак</span></button>
+        <button class="nav-btn" data-view="devices" type="button"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8"/></svg><span data-i18n="nav.devices">Устройства</span></button>
+        <button class="nav-btn" data-view="reports" type="button"><svg viewBox="0 0 24 24"><path d="M6 3h9l3 3v15H6z"/><path d="M9 12h6M9 16h6"/></svg><span data-i18n="nav.reports">Отчеты</span></button>
+        <div class="group" data-i18n="nav.g.manual">Сбор вручную</div>
+        <button class="nav-btn" data-view="pingcastle" type="button"><svg viewBox="0 0 24 24"><path d="M12 3v18M3 12h18"/></svg><span>PingCastle</span></button>
+        <button class="nav-btn" data-view="sharphound" type="button"><svg viewBox="0 0 24 24"><circle cx="6" cy="12" r="2"/><circle cx="18" cy="7" r="2"/><circle cx="18" cy="17" r="2"/><path d="M8 12h8M16 9l-8 2M16 15l-8-2"/></svg><span>SharpHound</span></button>
+        <div class="group" data-i18n="nav.g.platform">Платформа</div>
+        <button class="nav-btn" data-view="scan" type="button"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10"/></svg><span data-i18n="nav.scan">Сканирование</span></button>
+        <button class="nav-btn" data-view="docs" type="button"><svg viewBox="0 0 24 24"><path d="M4 5h12a4 4 0 0 1 4 4v10H8a4 4 0 0 0-4 4z"/><path d="M4 5v14"/></svg><span data-i18n="nav.docs">Документация</span></button>
+        <button class="nav-btn" data-view="settings" type="button"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2"/></svg><span data-i18n="nav.settings">Настройки</span></button>
+      </div>
+    </aside>
+    <div id="scrim" class="scrim"></div>
+    <div class="main">
+      <header>
+        <button id="menu-btn" class="menu-btn" type="button" aria-label="Меню">☰</button>
+        <input id="search" class="search" data-i18n-ph="search" placeholder="Поиск пользователей, устройств, групп..."/>
+        <select id="company-select"></select>
+        <span id="company-name" class="who"></span>
+        <div class="themes" role="group" aria-label="Тема">
+          <button type="button" data-set-theme="dark" data-i18n="theme.dark">Тёмная</button>
+          <button type="button" data-set-theme="light" data-i18n="theme.light">Светлая</button>
+          <button type="button" data-set-theme="cyber" data-i18n="theme.cyber">Кибер</button>
+        </div>
+        <select id="lang" style="flex:0 0 88px"><option value="ru">RU</option><option value="en">EN</option></select>
+        <span class="who" id="bell"></span>
+        <span class="who" id="who"></span>
+        <button id="logout-btn" class="btn ghost" type="button" data-i18n="logout">Выйти</button>
+      </header>
+
+      <section id="view-overview">
+        <h1 data-i18n="overview.title">Обзор безопасности каталога</h1>
+        <p class="sub" id="page-sub">balt.local</p>
+        <div id="empty-company" class="banner hidden">Компания ещё не создана. Откройте «Настройки», заполните карточку домена и сохраните её.</div>
+        <div id="demo-banner" class="banner hidden">
+          <span data-i18n="demo">Показан демонстрационный профиль. Это не результат живого сканирования.</span>
+          <button id="clear-demo" class="btn ghost" type="button" data-i18n="demo.clear">Очистить демо</button>
+        </div>
+        <div class="kpis" id="overview-kpis"></div>
+        <div class="mitre" id="mitre-row"></div>
+        <div class="grid-2">
+          <article class="card"><h2><span data-i18n="chart.trend">Тренд риска</span><span class="muted"><i class="swatch line"></i><span data-i18n="chart.index">Индекс</span></span></h2><div class="chart-box"><canvas id="trend"></canvas></div><div id="trend-empty" class="muted hidden" data-i18n="chart.empty">Нет срезов. Клик по точке откроет отчет PingCastle.</div></article>
+          <article class="card"><h2 data-i18n="chart.dist">Распределение рисков</h2><div class="dist"><div class="donut-wrap"><canvas id="donut"></canvas><div class="donut-center"><b id="donut-total">0</b><span data-i18n="chart.total">всего рисков</span></div></div><div class="legend side" id="legend"></div></div></article>
+        </div>
+        <article class="card">
+          <h2 data-i18n="table.top">Главные находки</h2>
+          <table><thead><tr><th data-i18n="col.risk">Риск</th><th data-i18n="col.type">Тип</th><th data-i18n="col.object">Объект</th><th data-i18n="col.level">Уровень</th><th>MITRE</th><th data-i18n="col.seen">Когда видели</th></tr></thead><tbody id="top-body"></tbody></table>
+        </article>
+      </section>
+
+      <section id="view-incidents" class="hidden">
+        <h1 data-i18n="inc.title">Инциденты</h1>
+        <p class="sub" data-i18n="inc.sub">Сигналы выбранной компании. Фильтры сужают таблицу, статус хранится в этом браузере.</p>
+        <div class="kpis" id="inc-kpis"></div>
+        <div class="filters" id="inc-filters"></div>
+        <div class="grid-2">
+          <article class="card chart-card">
+            <h2 data-i18n="inc.volume">Объем по категориям</h2>
+            <p class="muted">Нажмите столбец — в таблице останется только эта категория. Повторный клик снимает фильтр.</p>
+            <div class="chart-box tall"><canvas id="bars"></canvas></div>
+            <p id="bars-empty" class="muted hidden">Сигналов пока нет.</p>
+          </article>
+          <article class="card chart-card">
+            <h2 data-i18n="inc.source">Сигналы по источнику</h2>
+            <p class="muted">Сектор — модуль, который нашел сигнал. Нажмите сектор или подпись под диаграммой.</p>
+            <div class="donut-wrap"><canvas id="source-donut"></canvas><div class="donut-center"><b id="source-total">0</b><span data-i18n="inc.signals">сигналов</span></div></div>
+            <div class="legend" id="source-legend"></div>
+          </article>
+        </div>
+        <article class="card">
+          <h2 data-i18n="inc.recent">Последние события</h2>
+          <table><thead><tr><th data-i18n="col.when">Когда</th><th data-i18n="col.event">Событие</th><th data-i18n="col.source">Источник</th><th data-i18n="col.object">Объект</th><th data-i18n="col.level">Уровень</th><th>MITRE</th><th data-i18n="col.status">Статус</th></tr></thead><tbody id="inc-body"></tbody></table>
+        </article>
+      </section>
+
+      <section id="view-accounts" class="hidden">
+        <h1 data-i18n="acc.title">Учетные записи</h1>
+        <p class="sub" data-i18n="acc.sub">Только учетные записи, у которых найдена проблема: привилегии, пароль, гость, Kerberos.</p>
+        <div class="filters" id="acc-filters"></div>
+        <article class="card"><table><thead><tr><th data-i18n="col.account">Учетная запись</th><th data-i18n="col.problem">Проблема</th><th data-i18n="col.type">Тип</th><th data-i18n="col.level">Уровень</th><th data-i18n="col.seen">Когда видели</th></tr></thead><tbody id="acc-body"></tbody></table></article>
+      </section>
+
+      <section id="view-paths" class="hidden">
+        <h1 data-i18n="path.title">Пути атак</h1>
+        <p class="sub" data-i18n="path.sub">Объекты BloodHound и связанные отклонения Kerberos, делегирования и AD CS. Это карта для защиты, не инструкция атаки.</p>
+        <div id="paths"></div>
+      </section>
+
+      <section id="view-devices" class="hidden">
+        <h1 data-i18n="dev.title">Устройства</h1>
+        <p class="sub" data-i18n="dev.sub">Хосты, на которых найдена проблема: устаревшая ОС, теневое ПО, протокол, время контроллера.</p>
+        <div class="filters" id="dev-filters"></div>
+        <article class="card"><table><thead><tr><th data-i18n="col.host">Хост</th><th data-i18n="col.problem">Проблема</th><th data-i18n="col.type">Тип</th><th data-i18n="col.level">Уровень</th><th data-i18n="col.seen">Когда видели</th></tr></thead><tbody id="dev-body"></tbody></table></article>
+      </section>
+
+      <section id="view-reports" class="hidden">
+        <h1 data-i18n="rep.title">Отчеты</h1>
+        <p class="sub" data-i18n="rep.sub">Сравнение двух срезов PingCastle и выгрузки паспорта домена.</p>
+        <div class="filters">
+          <button id="excel-btn" class="btn ghost" type="button">Excel</button>
+          <button id="pdf-btn" class="btn ghost" type="button">PDF</button>
+          <input id="xml-file" type="file" accept=".xml" style="max-width:280px"/>
+          <button id="xml-btn" class="btn ghost" type="button" data-i18n="rep.import">Импорт PingCastle XML</button>
+        </div>
+        <div class="split">
+          <article class="card"><h2 data-i18n="rep.added">Что появилось</h2><p class="muted" id="diff-meta"></p><div id="diff-added"></div></article>
+          <article class="card"><h2 data-i18n="rep.removed">Что исчезло</h2><div id="diff-removed"></div></article>
+        </div>
+        <article class="card" style="margin-top:14px"><h2 data-i18n="rep.history">История срезов</h2><div id="history"></div></article>
+      </section>
+
+      <section id="view-docs" class="hidden">
+        <h1 data-i18n="nav.docs">Документация</h1>
+        <p class="sub" data-i18n="docs.lead">Архитектура, требования и описание каждого блока.</p>
+        <div class="doc-tools">
+          <button id="docs-open" class="btn ghost" type="button">Развернуть все</button>
+          <button id="docs-close" class="btn ghost" type="button">Свернуть все</button>
+          <input id="wiki-q" placeholder="Поиск по справочнику: SMB, LDAP, GPO..." style="max-width:360px"/>
+        </div>
+        <div id="docs-ru">
+          <details class="acc" open>
+            <summary>С чего начать</summary>
+            <p>Каталог читает Linux по LDAP или LDAPS. PingCastle и SharpHound ставятся на любой Windows-компьютер в домене: Windows Server 2019 или рабочая станция офицера безопасности. На контроллер их ставить не обязательно.</p>
+            <p><b>Настрой LDAP/LDAPS, установи BloodHound и PingCastle и приступай к сканированию!</b></p>
+          </details>
+          <details class="acc">
+            <summary>Каталог: LDAPS 636 и простой LDAP 389</summary>
+            <ol>
+              <li>В «Настройках» укажите DNS-имя контроллера и служебную учетную запись этого же домена. Формат <b>DOMAIN\user</b> или <b>user@domain</b>. Права администратора домена не нужны, достаточно чтения.</li>
+              <li>Выберите «Каталог: LDAPS, порт 636», если на контроллере включен сертификат. Для лаборатории или внутреннего ЦС проверка сертификата по умолчанию не блокирует соединение.</li>
+              <li>Если LDAPS еще не включен, выберите «Каталог: LDAP, порт 389». Это обычный LDAP без шифрования. Откройте с сервера аудита до контроллера только TCP 389 и не используйте его через недоверенные сети.</li>
+              <li>Сохраните карточку. Модули «Гигиена», «Доверия и SID» и типы шифрования Kerberos пойдут этим каналом, без программы на Windows.</li>
+            </ol>
+          </details>
+          <details class="acc">
+            <summary>Как скачать и установить PingCastle</summary>
+            <ol>
+              <li>На Windows-хосте откройте выпуски Netwrix PingCastle: <b>https://github.com/netwrix/pingcastle/releases</b>. Возьмите последний zip с PingCastle.exe.</li>
+              <li>Распакуйте в <b>C:\Tools\PingCastle</b>. Рядом окажется PingCastle.exe. Антивирус может спросить подтверждение: это сканер зрелости, не средство атаки.</li>
+              <li>Хост должен быть в том же домене или уметь достучаться до контроллера по LDAP. Запуск от имени учетной записи с правом чтения каталога.</li>
+              <li>Проверка вручную: <b>PingCastle.exe --healthcheck --server ИМЯ-КОНТРОЛЛЕРА</b>. Рядом появится XML. Пароль в командную строку не кладите.</li>
+            </ol>
+          </details>
+          <details class="acc">
+            <summary>Как скачать и установить SharpHound</summary>
+            <ol>
+              <li>Откройте выпуски SpecterOps SharpHound: <b>https://github.com/SpecterOps/SharpHound/releases</b>. Скачайте SharpHound.exe той же ветки, что понимает BloodHound CE.</li>
+              <li>Распакуйте в <b>C:\Tools\SharpHound</b>. Это сборщик графа. Он не выгружает хеши и билеты.</li>
+              <li>BloodHound CE уже работает на сервере аудита во внутренней сети Docker. Наружу его публиковать не нужно. Сборщик только передает zip на сервер аудита, а сервер сам кладет архив в CE.</li>
+              <li>Запускайте SharpHound в сессии доменной учетной записи чтения. Отдельный пароль в скрипт не записывается.</li>
+            </ol>
+          </details>
+          <details class="acc">
+            <summary>Как связать программы с сервером аудита</summary>
+            <p>Два рабочих способа. Выберите тот, до которого сервер аудита реально достучится.</p>
+            <p><b>Способ А. Сервер сам заходит на Windows.</b> В настройках заполните «Windows-хост» — это Server 2019 или компьютер офицера, не контроллер. Транспорт «WinRM» и порт 5986, открытый только с адреса сервера аудита. Учетная запись та же, что для каталога, плюс право удаленного PowerShell на этом хосте. Галочки PingCastle и BloodHound запустят уже установленные exe. Для реестра SMB, LLMNR и подписи LDAP WinRM нужен еще и на контроллере: эти параметры живут там.</p>
+            <p><b>Способ Б. Сборщик на самом Windows.</b> Если до компьютера офицера сервер не достучится, в настройках оставьте «только сборщик» и нажмите «Собрать скрипт сборщика». Скопируйте его на Windows, поправьте пути, если exe лежат не в C:\Tools, и запустите. Скрипт вызовет PingCastle и SharpHound и отправит XML и zip на этот сайт. Токен внутри скрипта одноразовый для компании, пароля домена в нем нет.</p>
+          </details>
+          <details class="acc">
+            <summary>Какая галочка что запускает</summary>
+            <ul>
+              <li><b>Гигиена, доверия, часть харденинга</b> — LDAP или LDAPS с Linux.</li>
+              <li><b>Опасные протоколы</b> — по LDAP типы шифрования DES и RC4; по WinRM на контроллере SMBv1, подпись SMB, LLMNR, NetBIOS, WPAD, WDigest, NTLMv1, подпись и привязка канала LDAP, анонимный сеанс, PowerShell 2.0, TLS 1.0.</li>
+              <li><b>PingCastle и SharpHound</b> — Windows-хост из поля выше или сборщик.</li>
+              <li><b>Время, GPO, AD CS, полный харденинг</b> — WinRM на контроллер. Значение cpassword не расшифровывается, билеты не запрашиваются.</li>
+            </ul>
+          </details>
+          <details class="acc">
+            <summary>Почта и Telegram</summary>
+            <p>В «Настройках» суперадминистратор указывает SMTP организации и бота Telegram. Пароль и токен сохраняются на сервере и обратно в браузер не отдаются. После сканирования уходят письмо и сообщение: индекс, статус и список критических и высоких находок, к письму прикладывается PDF. Адрес получателя и отдельный chat id задаются в карточке компании. Кнопки «Проверить» отправляют короткое тестовое сообщение, не запуская сканирование.</p>
+          </details>
+          <details class="acc">
+            <summary>Экраны, отчеты и MITRE ATT&CK</summary>
+            <ul>
+              <li><b>Обзор.</b> Карточки, тренд, кольцо и строка тактик MITRE. Клик по тактике оставляет только связанные находки.</li>
+              <li><b>Инциденты.</b> Фильтр уровня, статуса, категории и тактики MITRE. В карточке находки: номер техники, на что она влияет и как ее закрыть.</li>
+              <li><b>Отчеты.</b> PDF и Excel содержат график, проблему, влияние, способ закрытия и номер MITRE. Это карта защиты, не инструкция атаки.</li>
+              <li>Разделы документации сворачиваются. «Развернуть все» и «Свернуть все» действуют сразу. Обновление страницы открывает обзор заново, язык и тема остаются в браузере.</li>
+            </ul>
+          </details>
+          <h2 style="margin:18px 0 8px">Что система ищет</h2>
+          <p class="muted">Строка — одна проверка: что найдено и что закрыть. PingCastle разобран по всем правилам текущего выпуска. BloodHound — как читать граф. Платформа сама домен не меняет.</p>
+          <div class="wiki-tabs" id="wiki-tabs">
+            <button type="button" class="chip on" data-wiki="all">Все</button>
+            <button type="button" class="chip" data-wiki="platform">Наши проверки</button>
+            <button type="button" class="chip" data-wiki="pingcastle">PingCastle</button>
+            <button type="button" class="chip" data-wiki="bloodhound">BloodHound</button>
+          </div>
+          <div id="wiki-list"></div>
+        </div>
+        <div class="hidden" id="docs-en">
+          <details class="acc" open>
+            <summary>Start here</summary>
+            <p>The directory is read from Linux over LDAP or LDAPS. PingCastle and SharpHound run on any domain-joined Windows host: Server 2019 or the security officer workstation. They do not have to be installed on a domain controller.</p>
+          </details>
+          <details class="acc">
+            <summary>LDAP 389 and LDAPS 636</summary>
+            <p>Pick LDAPS 636 when the controller has a certificate. Pick plain LDAP 389 when LDAPS is not ready, and keep that port only on a trusted network. The same read account is enough. Use DOMAIN\user or user@domain.</p>
+          </details>
+          <details class="acc">
+            <summary>Install and connect the tools</summary>
+            <p>Download PingCastle from the Netwrix GitHub releases and SharpHound from the SpecterOps GitHub releases. Unzip them to C:\Tools\PingCastle and C:\Tools\SharpHound. Either point WinRM at that Windows host, or build the collector script in Settings and run it there. The script uploads the XML and the zip. It does not contain the domain password.</p>
+          </details>
+          <details class="acc">
+            <summary>Reports and MITRE</summary>
+            <p>PDF and Excel state the problem, the impact, how to close it, and the MITRE ATT&CK technique id. The overview has a tactic filter. Sections on this page expand and collapse.</p>
+          </details>
+        </div>
+
+      </section>
+
+      <section id="view-scan" class="hidden">
+        <h1 data-i18n="nav.scan">Сканирование</h1>
+        <p class="sub">Эти модули сервер запускает сам: каталог по LDAP и проверки Windows по WinRM. PingCastle и SharpHound загружаются в своих пунктах меню.</p>
+        <article class="card">
+          <div id="builder" class="checks">
+            <label><input type="checkbox" value="ad_cs" checked/> <span data-i18n="mod.cs">AD CS · Windows</span></label>
+            <label><input type="checkbox" value="software_audit" checked/> <span data-i18n="mod.soft">Аудит ПО · Windows</span></label>
+            <label><input type="checkbox" value="gpp_passwords" checked/> <span data-i18n="mod.gpp">Пароли в GPO · Windows</span></label>
+            <label><input type="checkbox" value="dc_hardening" checked/> <span data-i18n="mod.hard">Харденинг · LDAPS или Windows</span></label>
+            <label><input type="checkbox" value="trusts" checked/> <span data-i18n="mod.trust">Доверия и SID · LDAPS</span></label>
+            <label><input type="checkbox" value="time_sync" checked/> <span data-i18n="mod.time">Время · Windows</span></label>
+            <label><input type="checkbox" value="baseline_hygiene" checked/> <span data-i18n="mod.base">Гигиена · LDAPS</span></label>
+            <label><input type="checkbox" value="protocols" checked/> <span>Протоколы · LDAP и WinRM</span></label>
+          </div>
+          <div class="filters" style="margin-top:12px">
+            <button id="run-btn" class="btn" type="button" data-i18n="run">Запустить</button>
+            <select id="sched-interval"><option value="daily" data-i18n="sch.day">Каждый день</option><option value="weekly">Каждую неделю</option><option value="monthly">Каждый месяц</option></select>
+            <select id="sched-enabled"><option value="false">Выключен</option><option value="true">Включен</option></select>
+            <button id="sched-btn" class="btn ghost" type="button" data-i18n="sch.save">Сохранить расписание</button>
+          </div>
+          <div id="run-log" class="log"></div>
+        </article>
+      </section>
+
+      <section id="view-pingcastle" class="hidden">
+        <h1>PingCastle</h1>
+        <p class="sub">Программа запускается в обычном доменном входе на Windows. Сервер разбирает XML и кладет правила в общую статистику. Пароль в файл не входит.</p>
+        <div class="grid-2">
+          <article class="card">
+            <h2>Как снять срез</h2>
+            <ol>
+              <li>Войдите на Windows-хост доменной учетной записью чтения. Не через удаленный WinRM.</li>
+              <li>Запустите уже установленный PingCastle. Контроллер указывается ключом <b>--server</b>.</li>
+              <li>Загрузите появившийся XML справа.</li>
+            </ol>
+            <pre id="pc-cmd">C:\Tools\PingCastle\PingCastle.exe --healthcheck --server ИМЯ-КОНТРОЛЛЕРА</pre>
+          </article>
+          <article class="card">
+            <h2>Загрузка XML</h2>
+            <div class="drop"><div><b>Отчет PingCastle</b><br/>Файл ad_*.xml, не больше 20 МБ</div></div>
+            <input id="pc-file" type="file" accept=".xml" style="margin-top:12px"/>
+            <button id="pc-upload" class="btn" type="button" style="margin-top:10px">Загрузить XML</button>
+            <p id="pc-status" class="muted"></p>
+          </article>
+        </div>
+      </section>
+
+      <section id="view-sharphound" class="hidden">
+        <h1>SharpHound</h1>
+        <p class="sub">Сборщик запускается в том же доменном входе. В платформу попадает zip. Хеши и билеты не запрашиваются.</p>
+        <div class="grid-2">
+          <article class="card">
+            <h2>Как собрать граф</h2>
+            <ol>
+              <li>На Windows-хосте откройте обычную доменную сессию, не WinRM.</li>
+              <li>Запустите SharpHound методами DCOnly, Session, LocalAdmin и CA.</li>
+              <li>Загрузите zip справа. Сервер передаст его в BloodHound CE и обновит пути атак.</li>
+            </ol>
+            <pre>C:\Tools\SharpHound\SharpHound.exe -c DCOnly,Session,LocalAdmin,CA --zipfilename brosec --nosavecache</pre>
+          </article>
+          <article class="card">
+            <h2>Загрузка архива</h2>
+            <div class="drop"><div><b>Архив SharpHound</b><br/>Zip коллекции, не больше 80 МБ</div></div>
+            <input id="sh-file" type="file" accept=".zip" style="margin-top:12px"/>
+            <button id="sh-upload" class="btn" type="button" style="margin-top:10px">Загрузить zip</button>
+            <p id="sh-status" class="muted"></p>
+          </article>
+        </div>
+      </section>
+
+      <section id="view-settings" class="hidden">
+        <h1 data-i18n="nav.settings">Настройки</h1>
+        <p class="sub" data-i18n="set.sub">Подключение к каталогу, тенанты и администраторы.</p>
+        <div class="flow" id="flow-ru">
+          <article><b>1. Каталог</b><p>Служебная учетная запись домена. Linux открывает LDAPS и сам читает пользователей, группы, доверия и схему. Скрипт на Windows для этого не нужен.</p></article>
+          <article><b>2. Программы</b><p>PingCastle.exe и SharpHound.exe ставятся на любой Windows: Server 2019 или компьютер офицера. Контроллер для этого не нужен. Либо WinRM на этот хост, либо сборщик, который сам отправит результат.</p></article>
+          <article><b>3. Оба канала</b><p>Одна учетная запись чтения. Каталог идет по LDAP или LDAPS. PingCastle и SharpHound — с отдельного Windows-хоста или сборщиком. Реестр, время и SYSVOL — по WinRM на контроллер.</p></article>
+        </div>
+        <div class="flow hidden" id="flow-en">
+          <article><b>1. Directory</b><p>A domain service account. Linux opens LDAPS and reads users, groups, trusts, and schema. No Windows script is required for that.</p></article>
+          <article><b>2. Programs</b><p>Install PingCastle.exe and SharpHound.exe on any Windows host: Server 2019 or the officer workstation. The domain controller is not required. Use WinRM to that host, or the collector script.</p></article>
+          <article><b>3. Both channels</b><p>One read account. The directory uses LDAP or LDAPS. PingCastle and SharpHound run on a separate Windows host or via the collector. Registry, time, and SYSVOL use WinRM to the controller.</p></article>
+        </div>
+        <div class="split" id="notify-box">
+          <form id="mail-form" class="card">
+            <h2>Корпоративная почта</h2>
+            <p class="muted">Отчеты и алерты уходят через почтовый сервер организации. Пароль в карточку после сохранения не возвращается.</p>
+            <input id="smtp-server" placeholder="SMTP-сервер, например mail.company.local" style="margin-top:8px"/>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+              <input id="smtp-port" type="number" placeholder="Порт 587"/>
+              <select id="smtp-security">
+                <option value="starttls">STARTTLS, обычно 587</option>
+                <option value="ssl">SSL, обычно 465</option>
+                <option value="none">Без шифрования, обычно 25 во внутренней сети</option>
+              </select>
+            </div>
+            <input id="smtp-user" placeholder="Учетная запись SMTP" style="margin-top:8px"/>
+            <input id="smtp-pass" type="password" placeholder="Пароль SMTP, пусто — не менять" style="margin-top:8px"/>
+            <div class="muted" id="smtp-pass-set"></div>
+            <input id="smtp-from" placeholder="Адрес отправителя" style="margin-top:8px"/>
+            <input id="smtp-test-to" placeholder="Куда отправить проверочное письмо" style="margin-top:8px"/>
+            <div style="display:flex;gap:8px;margin-top:10px">
+              <button class="btn" type="submit">Сохранить почту</button>
+              <button id="smtp-test" class="btn ghost" type="button">Проверить</button>
+            </div>
+          </form>
+          <form id="tg-form" class="card">
+            <h2>Telegram</h2>
+            <p class="muted">Один бот на установку. Chat id компании, если заполнен, перекрывает общий чат. Токен после сохранения не показывается.</p>
+            <input id="tg-token" type="password" placeholder="Токен бота от BotFather, пусто — не менять" style="margin-top:8px"/>
+            <div class="muted" id="tg-token-set"></div>
+            <input id="tg-chat" placeholder="Chat id общего чата, например -100..." style="margin-top:8px"/>
+            <div style="display:flex;gap:8px;margin-top:10px">
+              <button class="btn" type="submit">Сохранить Telegram</button>
+              <button id="tg-test" class="btn ghost" type="button">Проверить</button>
+            </div>
+          </form>
+          <form id="ai-settings" class="card" style="grid-column:1 / -1">
+            <h2>ИИ-ассистент</h2>
+            <p class="muted">Любая модель с адресом в формате OpenAI, путь заканчивается на /v1. Ключ после сохранения не показывается. Пустое поле ключа оставляет уже сохраненный ключ или ключ сервера.</p>
+            <label style="display:flex;gap:8px;align-items:center;margin-top:8px"><input id="ai-enabled" type="checkbox"/> Включить внешнюю модель. Если выключено, ассистент отвечает по уже найденным рискам без запроса наружу.</label>
+            <input id="ai-url" placeholder="https://api.example/v1" style="margin-top:8px"/>
+            <input id="ai-model" placeholder="Имя модели у провайдера" style="margin-top:8px"/>
+            <input id="ai-key" type="password" placeholder="Ключ API, пусто — не менять" autocomplete="new-password" style="margin-top:8px"/>
+            <div class="muted" id="ai-key-set"></div>
+            <div style="display:flex;gap:8px;margin-top:10px">
+              <button class="btn" type="submit">Сохранить модель</button>
+              <button id="ai-test" class="btn ghost" type="button">Проверить</button>
+            </div>
+          </form>
+        </div>
+        <div class="split">
+          <form id="company-form" class="card">
+            <h2 data-i18n="set.conn">Подключение к Active Directory</h2>
+            <p class="muted" data-i18n="set.conn.help">LDAP 389 или LDAPS 636 читает каталог с Linux. PingCastle и SharpHound запускаются на любом Windows-хосте или сборщиком. Реестр читается по WinRM с контроллера.</p>
+            <input id="c-name" data-i18n-ph="set.name" placeholder="Название компании" style="margin-top:8px"/>
+            <input id="c-domain" data-i18n-ph="set.domain" placeholder="Домен DNS" style="margin-top:8px"/>
+            <input id="dc-host" data-i18n-ph="set.dc" placeholder="Контроллер домена" style="margin-top:8px"/>
+            <input id="c-user" data-i18n-ph="set.user" placeholder="DOMAIN\svc-audit или svc-audit@domain" style="margin-top:8px"/>
+            <input id="c-pass" type="password" data-i18n-ph="set.pass" placeholder="Пароль, пусто — не менять" style="margin-top:8px"/>
+            <div class="muted" id="c-pass-set"></div>
+            <select id="c-directory" style="margin-top:8px">
+              <option value="ldaps">Каталог: LDAPS, порт 636</option>
+              <option value="ldap">Каталог: LDAP, порт 389</option>
+            </select>
+            <input id="c-runner" placeholder="Windows-хост для PingCastle и SharpHound, не обязательно контроллер" style="margin-top:8px"/>
+            <select id="c-transport" style="margin-top:8px">
+              <option value="none">Программы: только сборщик, без WinRM</option>
+              <option value="winrm">Программы: WinRM на Windows-хост</option>
+              <option value="ssh">Программы: SSH на Windows-хост</option>
+            </select>
+            <div class="split" style="margin-top:8px">
+              <input id="c-ldap" type="number" placeholder="LDAPS 636"/>
+              <input id="c-winrm" type="number" placeholder="WinRM 5986"/>
+            </div>
+            <input id="c-ssh" type="number" placeholder="SSH" style="margin-top:8px"/>
+            <textarea id="c-hosts" rows="3" data-i18n-ph="set.hosts" placeholder="Дополнительные узлы для аудита ПО" style="margin-top:8px"></textarea>
+            <input id="c-mail" data-i18n-ph="set.mail" placeholder="Почта для отчета и алертов этой компании" style="margin-top:8px"/>
+            <input id="c-tg" placeholder="Chat id Telegram этой компании, пусто — общий чат" style="margin-top:8px"/>
+            <button class="btn" type="submit" style="margin-top:10px" data-i18n="save">Сохранить</button>
+          </form>
+          <div class="card">
+            <h2 data-i18n="set.tenants">Тенанты</h2>
+            <div id="tenant-box">
+              <input id="t-name" placeholder="Новая компания" style="margin-top:8px"/>
+              <input id="t-domain" placeholder="domain.local" style="margin-top:8px"/>
+              <button id="t-btn" class="btn" type="button" style="margin-top:8px" data-i18n="set.tenant.add">Создать компанию</button>
+            </div>
+            <h2 style="margin-top:16px" data-i18n="set.admins">Администраторы</h2>
+            <div id="users-box">
+              <input id="u-name" placeholder="Логин" style="margin-top:8px"/>
+              <input id="u-full" placeholder="Имя" style="margin-top:8px"/>
+              <input id="u-pass" type="password" placeholder="Пароль" style="margin-top:8px"/>
+              <select id="u-role" style="margin-top:8px"><option value="company_admin">Администратор компании</option><option value="superadmin">Суперадминистратор</option></select>
+              <button id="u-btn" class="btn" type="button" style="margin-top:8px" data-i18n="set.admin.add">Создать</button>
+            </div>
+          </div>
+        </div>
+        <article class="card" style="margin-top:14px">
+          <h2 data-i18n="set.winrm">Как открыть контроллер</h2>
+          <pre id="winrm-guide"></pre>
+        </article>
+        <article class="card" style="margin-top:14px">
+          <h2 data-i18n="set.honey">Ловушки</h2>
+          <p class="muted">Сборщик запускают на Windows Server 2019 или на компьютере офицера. Он сам вызывает PingCastle и SharpHound и отправляет результат сюда. Пароль в скрипт не записывается.</p>
+          <button id="collector-btn" class="btn" type="button">Собрать скрипт сборщика</button>
+          <button id="collector-copy" class="btn ghost" type="button">Копировать</button>
+          <pre id="collector-script"></pre>
+          <p class="muted" data-i18n="set.honey.help">Скрипт создает непривилегированные приманки. Пароль на экран не выводится.</p>
+          <button id="honey-btn" class="btn" type="button" data-i18n="set.honey.build">Собрать скрипт</button>
+          <button id="honey-copy" class="btn ghost" type="button" data-i18n="copy">Копировать</button>
+          <pre id="honey-script"></pre>
+        </article>
+      </section>
+    </div>
+  </div>
+
+  <div id="remediation" class="modal hidden"><div class="card">
+    <h2 id="rem-title"></h2><p class="muted" id="rem-std"></p><p id="rem-mitre"></p><p id="rem-impact"></p><p id="rem-summary"></p><ol id="rem-steps"></ol><pre id="rem-code"></pre>
+    <button id="rem-copy" class="btn" type="button" data-i18n="copy.ps">Копировать PowerShell</button>
+    <button id="rem-close" class="btn ghost" type="button" data-i18n="close">Закрыть</button>
+  </div></div>
+
+  <div id="intro" class="modal hidden"><div class="card">
+    <div class="steps"><span id="s0" class="on"></span><span id="s1"></span><span id="s2"></span><span id="s3"></span></div>
+    <h2 id="intro-title"></h2>
+    <p id="intro-body"></p>
+    <button id="intro-prev" class="btn ghost" type="button" data-i18n="back">Назад</button>
+    <button id="intro-next" class="btn" type="button" data-i18n="next">Далее</button>
+  </div></div>
+
+  <button id="ai-fab" class="hidden" type="button">AI</button>
+  <section id="ai-panel" class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center"><strong data-i18n="ai.title">Копилот домена</strong><button id="ai-close" class="btn ghost" type="button" data-i18n="close">Закрыть</button></div>
+    <div id="ai-log"></div>
+    <form id="ai-form" style="display:flex;gap:8px"><input id="ai-text" class="search" style="border-radius:12px" data-i18n-ph="ai.ph" placeholder="Спросите про риски выбранной компании"/><button class="btn" type="submit" data-i18n="ai.ask">Спросить</button></form>
+  </section>
+
+  <script src="/static/chart.umd.min.js"></script>
+  <script src="/static/wiki.js?v=12"></script>
+  <script>
+    const STR = {
+      ru: {
+        "login.sub": "Аудит Active Directory", "login.user": "Логин", "login.pass": "Пароль", "login.in": "Войти", "logout": "Выйти",
+        "nav.overview": "Обзор", "nav.incidents": "Инциденты", "nav.accounts": "Учетные записи", "nav.paths": "Пути атак",
+        "nav.devices": "Устройства", "nav.reports": "Отчеты", "nav.docs": "Документация", "nav.settings": "Настройки", "nav.scan": "Сканирование",
+        "nav.g.overview": "Обзор", "nav.g.manual": "Сбор вручную", "nav.g.platform": "Платформа",
+        "theme.dark": "Тёмная", "theme.light": "Светлая", "theme.cyber": "Кибер",
+        "search": "Поиск пользователей и устройств",
+        "overview.title": "Обзор безопасности каталога", "demo": "Показан демонстрационный профиль. Это не результат живого сканирования.", "demo.clear": "Очистить демо",
+        "chart.trend": "Тренд риска", "chart.dist": "Распределение рисков", "chart.total": "всего рисков", "chart.index": "Индекс", "chart.empty": "Нет срезов. Клик по точке откроет отчет PingCastle.",
+        "table.top": "Главные находки", "col.risk": "Риск", "col.type": "Тип", "col.object": "Объект", "col.level": "Уровень", "col.seen": "Когда видели",
+        "col.when": "Когда", "col.event": "Событие", "col.source": "Источник", "col.status": "Статус", "col.account": "Учетная запись", "col.problem": "Проблема", "col.host": "Хост",
+        "kpi.crit": "Критические риски", "kpi.high": "Высокие риски", "kpi.exp": "Открытые учетные записи", "kpi.stale": "Устаревшие объекты",
+        "kpi.alerts": "Активные сигналы", "kpi.highsev": "Высокая критичность", "kpi.objects": "Наблюдаемые объекты", "kpi.open": "Открытые разборы",
+        "inc.title": "Инциденты", "inc.sub": "Сигналы выбранной компании. Фильтры сужают таблицу, статус хранится в этом браузере.",
+        "inc.volume": "Объем по категориям", "inc.source": "Сигналы по источнику", "inc.signals": "сигналов", "inc.recent": "Последние события",
+        "acc.title": "Учетные записи", "acc.sub": "Только учетные записи, у которых найдена проблема: привилегии, пароль, гость, Kerberos.",
+        "path.title": "Пути атак", "path.sub": "Объекты BloodHound и связанные отклонения Kerberos, делегирования и AD CS. Это карта для защиты, не инструкция атаки.",
+        "path.empty": "Путей пока нет. Запустите BloodHound и проверки Kerberos в настройках.",
+        "dev.title": "Устройства", "dev.sub": "Хосты, на которых найдена проблема: устаревшая ОС, теневое ПО, протокол, время контроллера.",
+        "rep.title": "Отчеты", "rep.sub": "Сравнение двух срезов PingCastle и выгрузки паспорта домена.", "rep.import": "Импорт PingCastle XML",
+        "rep.added": "Что появилось", "rep.removed": "Что исчезло", "rep.history": "История срезов", "rep.none": "Два среза еще не готовы.", "rep.new": "Новых правил нет.", "rep.closed": "Закрытых правил нет.",
+        "docs.lead": "Архитектура, требования и описание каждого блока.",
+        "set.sub": "Подключение к каталогу, тенанты и администраторы.", "set.conn": "Подключение к Active Directory",
+        "set.conn.help": "LDAP 389 или LDAPS 636 читает каталог с Linux. PingCastle и SharpHound запускаются на любом Windows-хосте или сборщиком. Реестр читается по WinRM с контроллера.",
+        "set.name": "Название компании", "set.domain": "Домен DNS", "set.dc": "Контроллер домена", "set.user": "DOMAIN\\svc-audit или svc-audit@domain",
+        "set.pass": "Пароль, пусто — не менять", "set.hosts": "Дополнительные узлы для аудита ПО", "set.mail": "Почта для отчета",
+        "set.scan": "Сканирование", "set.tenants": "Тенанты", "set.tenant.add": "Создать компанию", "set.admins": "Администраторы", "set.admin.add": "Создать",
+        "set.winrm": "Как открыть контроллер", "set.honey": "Ловушки", "set.honey.help": "Скрипт создает непривилегированные приманки. Пароль на экран не выводится.", "set.honey.build": "Собрать скрипт",
+        "mod.pc": "PingCastle · Windows", "mod.bh": "BloodHound · Windows и граф", "mod.cs": "AD CS · Windows",
+        "mod.soft": "Аудит ПО · Windows", "mod.gpp": "Пароли в GPO · Windows", "mod.hard": "Харденинг · LDAPS или Windows", "mod.trust": "Доверия и SID · LDAPS", "mod.time": "Время · Windows", "mod.base": "Гигиена · LDAPS",
+        "sch.day": "Каждый день", "save": "Сохранить", "run": "Запустить", "sch.save": "Сохранить расписание", "copy": "Копировать", "copy.ps": "Копировать PowerShell", "close": "Закрыть", "back": "Назад", "next": "Далее", "done": "Начать работу",
+        "ai.title": "Копилот домена", "ai.ph": "Спросите про риски выбранной компании", "ai.ask": "Спросить", "ai.hello": "Спросите про топ рисков, устаревшие ОС, пароли или теневое ПО. Ответ строится по выбранной компании.", "ai.wait": "ИИ анализирует домен...",
+        "empty": "В этом разделе записей нет.", "all": "Все", "pass.set": "пароль уже сохранен", "pass.miss": "пароль не задан",
+        "st.open": "Открыт", "st.investigating": "В работе", "st.closed": "Закрыт",
+        "saved": "Карточка компании сохранена.", "queued": "Проверка поставлена в очередь...", "admin.ok": "Администратор создан.", "tenant.ok": "Компания создана.",
+        "drift.none": "сравнение появится после второго среза", "sev.critical": "Критический", "sev.high": "Высокий", "sev.medium": "Средний", "sev.low": "Низкий"
+      },
+      en: {
+        "login.sub": "Active Directory audit", "login.user": "Username", "login.pass": "Password", "login.in": "Sign in", "logout": "Sign out",
+        "nav.overview": "Overview", "nav.incidents": "Incidents", "nav.accounts": "Accounts", "nav.paths": "Attack paths",
+        "nav.devices": "Devices", "nav.reports": "Reports", "nav.docs": "Documentation", "nav.settings": "Settings", "nav.scan": "Scan",
+        "nav.g.overview": "Overview", "nav.g.manual": "Manual collection", "nav.g.platform": "Platform",
+        "theme.dark": "Dark", "theme.light": "Light", "theme.cyber": "Cyber",
+        "search": "Search users, devices, groups...",
+        "overview.title": "Directory security overview", "demo": "Demo profile. This is not a live scan.", "demo.clear": "Clear demo",
+        "chart.trend": "Risk trend", "chart.dist": "Risk distribution", "chart.total": "total risks", "chart.index": "Index", "chart.empty": "No slices yet. Click a point to open the PingCastle report.",
+        "table.top": "Top findings", "col.risk": "Risk", "col.type": "Type", "col.object": "Object", "col.level": "Level", "col.seen": "Last seen",
+        "col.when": "When", "col.event": "Event", "col.source": "Source", "col.status": "Status", "col.account": "Account", "col.problem": "Problem", "col.host": "Host",
+        "kpi.crit": "Critical risks", "kpi.high": "High risks", "kpi.exp": "Exposed accounts", "kpi.stale": "Stale objects",
+        "kpi.alerts": "Active alerts", "kpi.highsev": "High severity", "kpi.objects": "Monitored objects", "kpi.open": "Open investigations",
+        "inc.title": "Incidents", "inc.sub": "Signals for the selected company. Status is stored in this browser.",
+        "inc.volume": "Volume by category", "inc.source": "Alerts by source", "inc.signals": "alerts", "inc.recent": "Recent events",
+        "acc.title": "Accounts", "acc.sub": "Only accounts that have a finding: privilege, password, guest, Kerberos.",
+        "path.title": "Attack paths", "path.sub": "BloodHound objects and related Kerberos, delegation, and AD CS exposure. Defense map, not an attack guide.",
+        "path.empty": "No paths yet. Run BloodHound and the Kerberos checks in Settings.",
+        "dev.title": "Devices", "dev.sub": "Hosts with a finding: old OS, shadow software, protocol, or controller time.",
+        "rep.title": "Reports", "rep.sub": "Two PingCastle slices and the domain passport export.", "rep.import": "Import PingCastle XML",
+        "rep.added": "What appeared", "rep.removed": "What disappeared", "rep.history": "Slice history", "rep.none": "Two slices are not ready yet.", "rep.new": "No new rules.", "rep.closed": "No closed rules.",
+        "docs.lead": "Architecture, requirements, and every block.",
+        "set.sub": "Directory connection, tenants, and administrators.", "set.conn": "Active Directory connection",
+        "set.conn.help": "LDAP 389 or LDAPS 636 reads the directory from Linux. PingCastle and SharpHound run on any Windows host or via the collector. Registry checks use WinRM on the controller.",
+        "set.name": "Company name", "set.domain": "DNS domain", "set.dc": "Domain controller", "set.user": "DOMAIN\\svc-audit or svc-audit@domain",
+        "set.pass": "Password, blank keeps the saved one", "set.hosts": "Extra hosts for the software audit", "set.mail": "Report mailbox",
+        "set.scan": "Scan", "set.tenants": "Tenants", "set.tenant.add": "Create company", "set.admins": "Administrators", "set.admin.add": "Create",
+        "set.winrm": "How to open the controller", "set.honey": "Honeytokens", "set.honey.help": "The script creates unprivileged canaries. The password is not shown.", "set.honey.build": "Build script",
+        "mod.pc": "PingCastle · Windows", "mod.bh": "BloodHound · Windows and graph", "mod.cs": "AD CS · Windows",
+        "mod.soft": "Software · Windows", "mod.gpp": "GPO passwords · Windows", "mod.hard": "Hardening · LDAPS or Windows", "mod.trust": "Trusts and SID · LDAPS", "mod.time": "Time · Windows", "mod.base": "Hygiene · LDAPS",
+        "sch.day": "Every day", "save": "Save", "run": "Run", "sch.save": "Save schedule", "copy": "Copy", "copy.ps": "Copy PowerShell", "close": "Close", "back": "Back", "next": "Next", "done": "Start",
+        "ai.title": "Domain copilot", "ai.ph": "Ask about this company's risks", "ai.ask": "Ask", "ai.hello": "Ask about top risks, old operating systems, passwords, or shadow software. The answer uses the selected company.", "ai.wait": "The model is reading the domain...",
+        "empty": "Nothing in this section.", "all": "All", "pass.set": "password is saved", "pass.miss": "password is not set",
+        "st.open": "Open", "st.investigating": "Investigating", "st.closed": "Closed",
+        "saved": "Company card saved.", "queued": "Scan queued...", "admin.ok": "Administrator created.", "tenant.ok": "Company created.",
+        "drift.none": "a second slice is needed for the delta", "sev.critical": "Critical", "sev.high": "High", "sev.medium": "Medium", "sev.low": "Low"
+      }
+    };
+    const ACCOUNT_IDS = new Set(["ordinary_privileged","stale_password","inactive_stale","guest_enabled","kerberoasting","asrep_preauth","priv_password_never_expires","not_in_protected_users","honeytoken","gpp_password"]);
+    const DEVICE_IDS = new Set(["obsolete_os","anydesk_detected","teamviewer_detected","rustdesk_detected","vnc_detected","vpn_unauthorized","active_smbv1","print_spooler_on_dc","time_skew","time_ok"]);
+    const PATH_IDS = new Set(["kerberoasting","unconstrained_delegation","asrep_preauth","adcs_enrollee_san"]);
+    const savedTheme = localStorage.getItem("brosec-theme");
+    const state = { me: null, companyId: null, timeline: [], inventory: [], compare: null, mitre: [], view: "overview", lang: localStorage.getItem("brosec-lang") || "ru", theme: ["dark", "light", "cyber"].includes(savedTheme) ? savedTheme : "dark", sev: "", status: "", category: "", source: "", tactic: "", charts: {}, intro: 0, wikiGroup: "all" };
+    const loginBox = document.getElementById("login");
+    const appBox = document.getElementById("app");
+
+    function t(key) { return (STR[state.lang] && STR[state.lang][key]) || STR.ru[key] || key; }
+    function applyI18n() {
+      document.documentElement.lang = state.lang;
+      document.querySelectorAll("[data-i18n]").forEach((el) => { el.textContent = t(el.dataset.i18n); });
+      document.querySelectorAll("[data-i18n-ph]").forEach((el) => { el.placeholder = t(el.dataset.i18nPh); });
+      document.getElementById("docs-ru").classList.toggle("hidden", state.lang !== "ru");
+      document.getElementById("docs-en").classList.toggle("hidden", state.lang !== "en");
+      document.getElementById("flow-ru").classList.toggle("hidden", state.lang !== "ru");
+      document.getElementById("flow-en").classList.toggle("hidden", state.lang !== "en");
+    }
+    function esc(value) { return String(value ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch])); }
+    async function api(url, options = {}) {
+      options.credentials = "same-origin";
+      const response = await fetch(url, options);
+      if (response.status === 401) { showLogin(); throw new Error("auth"); }
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : "Запрос отклонен");
+      return data;
+    }
+    function showLogin() { appBox.classList.add("hidden"); loginBox.classList.remove("hidden"); document.getElementById("ai-fab").classList.add("hidden"); document.getElementById("ai-panel").classList.remove("open"); }
+    function showApp() { loginBox.classList.add("hidden"); appBox.classList.remove("hidden"); document.getElementById("ai-fab").classList.remove("hidden"); }
+    function companyId() { return state.companyId; }
+    function rank(row) { return { critical: 0, high: 1, medium: 2, low: 3, info: 4 }[row.severity] ?? 5; }
+    function incidents() { return state.inventory.filter((row) => row.severity !== "info"); }
+    function isAccount(row) { return ACCOUNT_IDS.has(row.vuln_id); }
+    function isDevice(row) { return DEVICE_IDS.has(row.vuln_id) || (row.tags || "").includes("shadow_it"); }
+    function isPath(row) { return PATH_IDS.has(row.vuln_id) || (row.tags || "").includes("bloodhound"); }
+    function statuses() { try { return JSON.parse(localStorage.getItem("brosec-status") || "{}"); } catch { return {}; } }
+    function rowStatus(row) {
+      const saved = statuses()[String(row.id)];
+      if (saved) return saved;
+      return "open";
+    }
+    function setStatus(id) {
+      const order = ["open", "investigating", "closed"];
+      const all = statuses();
+      const now = all[String(id)] || "open";
+      all[String(id)] = order[(order.indexOf(now) + 1) % order.length];
+      localStorage.setItem("brosec-status", JSON.stringify(all));
+      paint();
+    }
+    function queryMatch(row) {
+      const q = document.getElementById("search").value.trim().toLowerCase();
+      if (!q) return true;
+      return [row.hostname, row.category, row.title, row.detail, row.tags].join(" ").toLowerCase().includes(q);
+    }
+    function pill(row) {
+      const label = state.lang === "en" ? t("sev." + row.severity) : row.severity_label;
+      return `<span class="pill sev-${esc(row.severity)}"><i></i>${esc(label)}</span>`;
+    }
+    function statusPill(row) {
+      const key = rowStatus(row);
+      return `<button class="chip st-${key}" type="button" data-status="${row.id}">${esc(t("st." + key))}</button>`;
+    }
+    function driftText(now, delta) {
+      if (delta === null) return t("drift.none");
+      const prev = now - delta;
+      if (!prev) return (delta > 0 ? "+" : "") + delta;
+      const pct = Math.round((delta / prev) * 100);
+      return (pct > 0 ? "+" : "") + pct + "%";
+    }
+    function kpi(kind, icon, label, value, delta) {
+      const cls = delta > 0 ? "up" : delta < 0 ? "down" : "";
+      const extra = delta === false ? "" : `<div class="delta ${cls}">${esc(driftText(value, delta))}</div>`;
+      return `<article class="kpi ${kind}"><div class="ico ${kind}">${icon}</div><div><div class="label">${esc(label)}</div><div class="num">${value}</div>${extra}</div></article>`;
+    }
+    const ICONS = {
+      shield: '<svg viewBox="0 0 24 24"><path d="M12 3 5 6v6c0 4.5 3 7 7 9 4-2 7-4.5 7-9V6z"/></svg>',
+      alert: '<svg viewBox="0 0 24 24"><path d="M12 4 3 19h18z"/><path d="M12 10v4"/></svg>',
+      user: '<svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3"/><path d="M5 19c1.5-3 4-4 7-4s5.5 1 7 4"/></svg>',
+      box: '<svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/></svg>',
+      search: '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="m20 20-3.5-3.5"/></svg>'
+    };
+
+    function applyTheme(theme) {
+      if (!["dark", "light", "cyber"].includes(theme)) theme = "dark";
+      state.theme = theme;
+      localStorage.setItem("brosec-theme", theme);
+      document.documentElement.dataset.theme = theme;
+      document.querySelectorAll("[data-set-theme]").forEach((btn) => btn.classList.toggle("on", btn.dataset.setTheme === theme));
+      if (state.inventory) paint();
+    }
+
+    document.getElementById("login-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      document.getElementById("login-error").textContent = "";
+      try {
+        await api("/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: document.getElementById("login-user").value.trim(), password: document.getElementById("login-pass").value }) });
+        await boot();
+      } catch (error) {
+        if (error.message !== "auth") document.getElementById("login-error").textContent = error.message;
+      }
+    });
+
+    async function boot() {
+      state.me = await api("/api/me");
+      showApp();
+      document.getElementById("who").textContent = state.me.full_name || state.me.username;
+      document.getElementById("users-box").classList.toggle("hidden", !state.me.is_superadmin);
+      document.getElementById("tenant-box").classList.toggle("hidden", !state.me.is_superadmin);
+      document.getElementById("notify-box").classList.toggle("hidden", !state.me.is_superadmin);
+      document.getElementById("ai-settings").classList.toggle("hidden", !state.me.is_superadmin);
+      if (state.me.is_superadmin) { loadNotify(); loadAssistant(); }
+      renderWiki();
+      document.getElementById("c-name").disabled = !state.me.is_superadmin;
+      await loadCompanies();
+      if (!localStorage.getItem("brosec-intro")) openIntro(0);
+    }
+    async function loadCompanies() {
+      const rows = await api("/api/companies");
+      const select = document.getElementById("company-select");
+      select.innerHTML = rows.map((row) => `<option value="${row.id}">${esc(row.name)}</option>`).join("");
+      select.classList.toggle("hidden", !state.me.is_superadmin);
+      document.getElementById("company-name").classList.toggle("hidden", state.me.is_superadmin);
+      if (!rows.length) {
+        state.companyId = 0;
+        document.getElementById("page-sub").textContent = "Компания ещё не создана";
+        document.getElementById("empty-company").classList.remove("hidden");
+        return;
+      }
+      document.getElementById("empty-company").classList.add("hidden");
+      select.value = String(state.companyId || state.me.company_id || rows[0].id);
+      state.companyId = Number(select.value);
+      document.getElementById("company-name").textContent = rows.find((row) => row.id === state.companyId)?.name || "";
+      await loadDashboard();
+    }
+    function fillCompany(company) {
+      document.getElementById("c-name").value = company.name || "";
+      document.getElementById("c-domain").value = company.domain || "";
+      document.getElementById("c-directory").value = company.directory_mode || "ldaps";
+      document.getElementById("c-runner").value = company.runner_host || "";
+      document.getElementById("c-transport").value = company.windows_mode || "none";
+      document.getElementById("c-ldap").value = company.ldap_port || (company.directory_mode === "ldap" ? 389 : 636);
+      document.getElementById("c-winrm").value = company.winrm_port || 5985;
+      document.getElementById("c-ssh").value = company.ssh_port || 22;
+      document.getElementById("c-user").value = company.dc_user || "";
+      document.getElementById("c-pass").value = "";
+      document.getElementById("c-pass-set").textContent = company.dc_password_set ? t("pass.set") : t("pass.miss");
+      document.getElementById("c-hosts").value = company.scan_hosts || "";
+      document.getElementById("c-mail").value = company.notify_email || "";
+      document.getElementById("c-tg").value = company.telegram_chat || "";
+      document.getElementById("dc-host").value = company.dc_host || "";
+      document.getElementById("sched-interval").value = company.schedule || "weekly";
+      document.getElementById("sched-enabled").value = company.scheduler_enabled ? "true" : "false";
+      document.getElementById("page-sub").textContent = company.domain || company.name || "";
+    }
+    async function loadDashboard() {
+      const data = await api("/api/dashboard?company_id=" + companyId());
+      fillCompany(data.company);
+      state.inventory = data.inventory || [];
+      state.timeline = data.timeline || [];
+      state.compare = data.compare || null;
+      state.mitre = data.mitre || [];
+      document.getElementById("demo-banner").classList.toggle("hidden", !data.demo_profile);
+      paint();
+    }
+
+    function destroy(name) { if (state.charts[name]) { state.charts[name].destroy(); state.charts[name] = null; } }
+    function colors() {
+      if (state.theme === "light") return { line: "#14b8a6", fill: "rgba(20,184,166,.18)", point: "#0f766e", tick: "#66718c", grid: "rgba(28,39,68,.06)", donut: ["#ef4444","#f59e0b","#3b82f6","#10b981"], bar: ["#14b8a6","#38bdf8","#6366f1","#f59e0b","#ef4444"] };
+      if (state.theme === "cyber") return { line: "#e14bff", fill: "rgba(180,76,255,.2)", point: "#3ecbff", tick: "#8e98b8", grid: "rgba(255,255,255,.05)", donut: ["#ff3b5c","#ff9f1a","#b44cff","#2ee59d"], bar: ["#ff9f1a","#3ecbff","#e14bff","#2ee59d","#ff3b5c"] };
+      return { line: "#fafafa", fill: "rgba(250,250,250,.14)", point: "#fafafa", tick: "#a1a1aa", grid: "rgba(255,255,255,.06)", donut: ["#ff3b5c","#ff9f1a","#7c5cff","#2ee59d"], bar: ["#fafafa","#a1a1aa","#ff9f1a","#3ecbff","#e14bff"] };
+    }
+    function deltaOf(pred) {
+      const cmp = state.compare && state.compare.ready ? state.compare : null;
+      if (!cmp) return null;
+      return cmp.added.filter(pred).length - cmp.removed.filter(pred).length;
+    }
+
+    function paint() {
+      document.querySelectorAll("[id^=view-]").forEach((node) => node.classList.toggle("hidden", node.id !== "view-" + state.view));
+      const rows = incidents();
+      const crit = rows.filter((row) => row.severity === "critical").length;
+      const high = rows.filter((row) => row.severity === "high").length;
+      const exposed = state.inventory.filter((row) => ["ordinary_privileged","stale_password","kerberoasting","asrep_preauth","gpp_password"].includes(row.vuln_id)).length;
+      const stale = state.inventory.filter((row) => ["obsolete_os","inactive_stale"].includes(row.vuln_id)).length;
+      document.getElementById("bell").textContent = crit ? "● " + crit : "";
+      document.getElementById("overview-kpis").innerHTML = [
+        kpi("crit", ICONS.shield, t("kpi.crit"), crit, deltaOf((row) => row.severity === "critical")),
+        kpi("high", ICONS.alert, t("kpi.high"), high, deltaOf((row) => row.severity === "high")),
+        kpi("cyan", ICONS.user, t("kpi.exp"), exposed, deltaOf((row) => ["ordinary_privileged","stale_password","kerberoasting"].includes(row.vuln_id))),
+        kpi("mid", ICONS.box, t("kpi.stale"), stale, deltaOf((row) => ["obsolete_os","inactive_stale"].includes(row.vuln_id)))
+      ].join("");
+      const openCount = rows.filter((row) => rowStatus(row) === "open").length;
+      const hosts = new Set(state.inventory.map((row) => row.hostname)).size;
+      document.getElementById("inc-kpis").innerHTML = [
+        kpi("crit", ICONS.alert, t("kpi.alerts"), rows.length, false),
+        kpi("high", ICONS.alert, t("kpi.highsev"), crit + high, false),
+        kpi("cyan", ICONS.box, t("kpi.objects"), hosts, false),
+        kpi("mid", ICONS.search, t("kpi.open"), openCount, false)
+      ].join("");
+      drawMitre();
+      drawTrend();
+      drawDonut("donut", "donut-total", "legend", rows);
+      drawTop(rows.filter((row) => queryMatch(row) && (!state.tactic || row.tactic === state.tactic)).sort((a, b) => rank(a) - rank(b)).slice(0, 8));
+      drawIncidentFilters();
+      const shown = filteredIncidents();
+      drawBars(shown);
+      drawSource(shown);
+      drawIncidentTable();
+      drawSimpleFilters("acc-filters", "acc");
+      drawRows("acc-body", state.inventory.filter((row) => isAccount(row) && queryMatch(row) && (!state.sev || row.severity === state.sev)), "account");
+      drawPaths();
+      drawSimpleFilters("dev-filters", "dev");
+      drawRows("dev-body", state.inventory.filter((row) => isDevice(row) && queryMatch(row) && (!state.sev || row.severity === state.sev)), "host");
+      drawReports();
+    }
+
+    function drawMitre() {
+      const box = document.getElementById("mitre-row");
+      const items = state.mitre || [];
+      box.innerHTML = `<button class="chip ${state.tactic ? "" : "on"}" type="button" data-tactic="">Все тактики</button>` + items.map((item) => `<button class="chip ${state.tactic === item.tactic ? "on" : ""}" type="button" data-tactic="${esc(item.tactic)}">${esc(item.tactic)} · ${esc(item.count)}</button>`).join("");
+    }
+    function drawTrend() {
+      const empty = document.getElementById("trend-empty");
+      destroy("trend");
+      if (!state.timeline.length) { empty.classList.remove("hidden"); return; }
+      empty.classList.add("hidden");
+      const c = colors();
+      state.charts.trend = new Chart(document.getElementById("trend"), {
+        type: "line",
+        data: { labels: state.timeline.map((p) => p.label), datasets: [{ data: state.timeline.map((p) => p.score), borderColor: c.line, backgroundColor: c.fill, fill: true, tension: .4, pointRadius: 4, pointBackgroundColor: c.point }] },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { min: 0, max: 100, ticks: { color: c.tick }, grid: { color: c.grid } }, x: { ticks: { color: c.tick }, grid: { display: false } } }, onClick: (_e, els) => { if (!els.length) return; const point = state.timeline[els[0].index]; if (point && point.scan_id) window.open("/api/reports/" + point.scan_id, "_blank"); } }
+      });
+    }
+    function drawDonut(canvasId, totalId, legendId, rows) {
+      const order = ["critical", "high", "medium", "low"];
+      const values = order.map((key) => rows.filter((row) => row.severity === key).length);
+      const total = values.reduce((s, n) => s + n, 0);
+      document.getElementById(totalId).textContent = total;
+      const palette = colors().donut;
+      if (legendId) {
+        document.getElementById(legendId).innerHTML = order.map((key, i) => `<span style="color:${palette[i]}">● ${esc(t("sev." + key))} ${values[i]} (${total ? Math.round(values[i] / total * 100) : 0}%)</span>`).join("");
+      }
+      destroy(canvasId);
+      state.charts[canvasId] = new Chart(document.getElementById(canvasId), { type: "doughnut", data: { labels: order, datasets: [{ data: values, backgroundColor: palette, borderWidth: 0 }] }, options: { cutout: "74%", responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } } });
+    }
+    function drawTop(rows) {
+      document.getElementById("top-body").innerHTML = rows.map((row) => `<tr class="clickable" data-vuln="${esc(row.vuln_id)}"><td>${esc(row.title)}<div class="muted">${esc(row.detail)}</div></td><td>${esc(row.category)}</td><td>${esc(row.hostname)}</td><td>${pill(row)}</td><td>${esc(row.mitre || "")}<div class="muted">${esc(row.tactic || "")}</div></td><td>${esc(row.detected_at)}</td></tr>`).join("") || `<tr><td colspan="6" class="muted">${esc(t("empty"))}</td></tr>`;
+    }
+    function sevChips(target) {
+      return ["", "critical", "high", "medium", "low"].map((key) => `<button class="chip ${state.sev === key ? "on" : ""}" type="button" data-filter="${target}" data-sev="${key}">${esc(key ? t("sev." + key) : t("all"))}</button>`).join("");
+    }
+    function drawSimpleFilters(id, target) { document.getElementById(id).innerHTML = sevChips(target); }
+    function drawIncidentFilters() {
+      const cats = [...new Set(incidents().map((row) => row.category))].sort();
+      const statuses = ["", "open", "investigating", "closed"].map((key) => `<button class="chip ${state.status === key ? "on" : ""}" type="button" data-st="${key}">${esc(key ? t("st." + key) : t("all"))}</button>`).join("");
+      const tactics = [...new Set(incidents().map((row) => row.tactic).filter(Boolean))].sort();
+      document.getElementById("inc-filters").innerHTML = sevChips("inc") + statuses + `<select id="cat-filter"><option value="">${esc(t("all"))}</option>${cats.map((cat) => `<option ${state.category === cat ? "selected" : ""}>${esc(cat)}</option>`).join("")}</select>` + `<select id="mitre-filter"><option value="">MITRE</option>${tactics.map((name) => `<option ${state.tactic === name ? "selected" : ""}>${esc(name)}</option>`).join("")}</select>`;
+    }
+    function sourceName(row) {
+      const found = String(row.tags || "").match(/module:([a-z0-9_]+)/);
+      const names = { protocols: "Протоколы", baseline: "Базовый профиль", pingcastle: "PingCastle", bloodhound: "BloodHound", baseline_hygiene: "Гигиена каталога", trusts: "Доверия", time_sync: "Время", dc_hardening: "Харденинг", software_audit: "Аудит ПО", gpp_passwords: "Пароли в GPO", ad_cs: "AD CS", honeytoken: "Ловушки" };
+      if (found) return names[found[1]] || found[1];
+      return row.category || "Прочее";
+    }
+    function filteredIncidents() {
+      return incidents().filter((row) => queryMatch(row) && (!state.sev || row.severity === state.sev) && (!state.status || rowStatus(row) === state.status) && (!state.category || row.category === state.category) && (!state.source || sourceName(row) === state.source) && (!state.tactic || row.tactic === state.tactic));
+    }
+    function chartHover(event, els) { if (event.native && event.native.target) event.native.target.style.cursor = els.length ? "pointer" : "default"; }
+    function drawBars(rows) {
+      const map = {};
+      rows.forEach((row) => { map[row.category] = (map[row.category] || 0) + 1; });
+      const labels = Object.keys(map);
+      const empty = document.getElementById("bars-empty");
+      destroy("bars");
+      empty.classList.toggle("hidden", labels.length > 0);
+      if (!labels.length) return;
+      const c = colors();
+      state.charts.bars = new Chart(document.getElementById("bars"), {
+        type: "bar",
+        data: { labels, datasets: [{ data: labels.map((key) => map[key]), backgroundColor: labels.map((key, i) => state.category === key ? c.line : c.bar[i % c.bar.length]), borderRadius: 8, barThickness: 18, maxBarThickness: 22 }] },
+        options: { indexAxis: "y", responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { backgroundColor: "#111827", titleColor: "#fff", bodyColor: "#e5e7eb", padding: 10, cornerRadius: 8 } }, scales: { x: { ticks: { color: c.tick, precision: 0 }, grid: { color: c.grid }, border: { display: false } }, y: { ticks: { color: c.tick }, grid: { display: false }, border: { display: false } } }, onHover: chartHover, onClick: (_event, els) => { if (!els.length) return; const label = labels[els[0].index]; state.category = state.category === label ? "" : label; paint(); } }
+      });
+    }
+    function drawSource(rows) {
+      const map = {};
+      rows.forEach((row) => { const name = sourceName(row); map[name] = (map[name] || 0) + 1; });
+      const labels = Object.keys(map);
+      const values = labels.map((key) => map[key]);
+      const total = values.reduce((sum, n) => sum + n, 0);
+      document.getElementById("source-total").textContent = total;
+      const palette = colors().bar;
+      document.getElementById("source-legend").innerHTML = labels.map((key, i) => `<button type="button" class="${state.source === key ? "on" : ""}" data-source="${esc(key)}" style="border-color:${palette[i % palette.length]}"><i class="swatch" style="background:${palette[i % palette.length]}"></i>${esc(key)} · ${values[i]}</button>`).join("") || `<span class="muted">Сигналов пока нет.</span>`;
+      destroy("source-donut");
+      if (!labels.length) return;
+      state.charts["source-donut"] = new Chart(document.getElementById("source-donut"), {
+        type: "doughnut",
+        data: { labels, datasets: [{ data: values, backgroundColor: labels.map((_, i) => palette[i % palette.length]), borderWidth: 0, hoverOffset: 10, spacing: 4, borderRadius: 6 }] },
+        options: { cutout: "72%", responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { backgroundColor: "#111827", titleColor: "#fff", bodyColor: "#e5e7eb", padding: 10, cornerRadius: 8 } }, onHover: chartHover, onClick: (_event, els) => { if (!els.length) return; const label = labels[els[0].index]; state.source = state.source === label ? "" : label; paint(); } }
+      });
+    }
+    function drawIncidentTable() {
+      document.getElementById("inc-body").innerHTML = filteredIncidents().map((row) => `<tr class="clickable" data-vuln="${esc(row.vuln_id)}"><td>${esc(row.detected_at)}</td><td>${esc(row.title)}<div class="muted">${esc(row.detail)}</div></td><td>${esc(row.category)}</td><td>${esc(row.hostname)}</td><td>${pill(row)}</td><td>${esc(row.mitre || "")}</td><td>${statusPill(row)}</td></tr>`).join("") || `<tr><td colspan="7" class="muted">${esc(t("empty"))}</td></tr>`;
+    }
+    function drawRows(bodyId, rows, kind) {
+      document.getElementById(bodyId).innerHTML = rows.sort((a, b) => rank(a) - rank(b)).map((row) => `<tr class="clickable" data-vuln="${esc(row.vuln_id)}"><td>${esc(row.hostname)}</td><td>${esc(row.title)}<div class="muted">${esc(row.detail)}</div></td><td>${esc(row.category)}</td><td>${pill(row)}</td><td>${esc(row.detected_at)}</td></tr>`).join("") || `<tr><td colspan="5" class="muted">${esc(t("empty"))}</td></tr>`;
+    }
+    function drawPaths() {
+      const rows = state.inventory.filter((row) => isPath(row) && queryMatch(row));
+      const notes = {
+        kerberoasting: state.lang === "en" ? "A service account with an SPN can be targeted offline if the password is short. Move the service to a gMSA. Do not request a ticket from this screen." : "Служебная запись со SPN удобна для офлайн-подбора, если пароль короткий. Переведите службу на gMSA. Билет отсюда не запрашивается.",
+        unconstrained_delegation: state.lang === "en" ? "Unconstrained delegation keeps other users' tickets on the host. Limit it to domain controllers." : "Неограниченное делегирование оставляет на узле билеты других пользователей. Оставьте его только контроллерам.",
+        asrep_preauth: state.lang === "en" ? "Pre-authentication is off, so a request can be tested offline. Turn pre-authentication back on." : "Предварительная проверка подлинности выключена. Включите ее обратно.",
+        adcs_enrollee_san: state.lang === "en" ? "The template lets the requester supply the subject name. Require approval or remove that flag." : "Шаблон позволяет заявителю задать имя субъекта. Включите согласование или снимите флаг."
+      };
+      document.getElementById("paths").innerHTML = rows.map((row) => `<article class="hit ${esc(row.severity)}"><strong>${esc(row.title)}</strong><div class="muted">${esc(row.hostname)} · ${esc(row.category)}</div><p>${esc(row.detail)}</p><p>${esc(notes[row.vuln_id] || "")}</p></article>`).join("") || `<article class="card">${esc(t("path.empty"))}</article>`;
+    }
+    function chipRow(row) { return `<div class="hit ${esc(row.severity || "medium")}"><strong>${esc(row.title || "")}</strong><div class="muted">${esc(row.hostname || "")} · ${esc(row.detail || "")}</div></div>`; }
+    function drawReports() {
+      const data = state.compare || {};
+      document.getElementById("diff-meta").textContent = data.ready ? `${data.left.label} → ${data.right.label}. ${data.message}` : (data.message || t("rep.none"));
+      document.getElementById("diff-added").innerHTML = (data.added || []).map(chipRow).join("") || `<div class="muted">${esc(t("rep.new"))}</div>`;
+      document.getElementById("diff-removed").innerHTML = (data.removed || []).map(chipRow).join("") || `<div class="muted">${esc(t("rep.closed"))}</div>`;
+      document.getElementById("history").innerHTML = state.timeline.map((point) => `<div class="hit"><button class="btn ghost" type="button" data-report="${point.scan_id}">${esc(point.label)}</button> <span class="muted">${esc(String(point.score))}</span></div>`).join("") || `<div class="muted">${esc(t("chart.empty"))}</div>`;
+    }
+
+    function closeMenu() {
+      document.getElementById("side").classList.remove("open");
+      document.getElementById("scrim").classList.remove("on");
+    }
+    function showView(view) {
+      state.view = view;
+      document.querySelectorAll(".nav-btn").forEach((btn) => btn.classList.toggle("active", btn.dataset.view === view));
+      const dc = (document.getElementById("dc-host").value || "").trim() || "ИМЯ-КОНТРОЛЛЕРА";
+      const cmd = document.getElementById("pc-cmd");
+      if (cmd) cmd.textContent = "C:\\Tools\\PingCastle\\PingCastle.exe --healthcheck --server " + dc;
+      closeMenu();
+      paint();
+    }
+    document.querySelectorAll(".nav-btn").forEach((btn) => btn.addEventListener("click", () => showView(btn.dataset.view)));
+    document.getElementById("menu-btn").addEventListener("click", () => {
+      document.getElementById("side").classList.toggle("open");
+      document.getElementById("scrim").classList.toggle("on");
+    });
+    document.getElementById("scrim").addEventListener("click", closeMenu);
+    document.getElementById("search").addEventListener("input", paint);
+    document.body.addEventListener("change", (event) => {
+      if (event.target.id === "cat-filter") { state.category = event.target.value; paint(); return; }
+      if (event.target.id === "mitre-filter") { state.tactic = event.target.value; paint(); return; }
+      if (event.target.id === "c-directory") {
+        document.getElementById("c-ldap").value = event.target.value === "ldap" ? 389 : 636;
+      }
+    });
+    document.getElementById("company-select").addEventListener("change", async (event) => { state.companyId = Number(event.target.value); await loadDashboard(); });
+    document.querySelectorAll("[data-set-theme]").forEach((btn) => btn.addEventListener("click", () => applyTheme(btn.dataset.setTheme)));
+    document.getElementById("lang").value = state.lang;
+    document.getElementById("lang").addEventListener("change", (event) => { state.lang = event.target.value; localStorage.setItem("brosec-lang", state.lang); applyI18n(); paint(); });
+    document.body.addEventListener("click", async (event) => {
+      const status = event.target.closest("[data-status]");
+      if (status) { event.stopPropagation(); setStatus(status.dataset.status); return; }
+      const tactic = event.target.closest("[data-tactic]");
+      if (tactic) { state.tactic = tactic.dataset.tactic; paint(); return; }
+      const source = event.target.closest("[data-source]");
+      if (source) { state.source = state.source === source.dataset.source ? "" : source.dataset.source; paint(); return; }
+      const filter = event.target.closest("[data-sev]");
+      if (filter) { state.sev = filter.dataset.sev; paint(); return; }
+      const st = event.target.closest("[data-st]");
+      if (st) { state.status = st.dataset.st; paint(); return; }
+      const report = event.target.closest("[data-report]");
+      if (report) { window.open("/api/reports/" + report.dataset.report, "_blank"); return; }
+      const vuln = event.target.closest("[data-vuln]");
+      if (!vuln || !vuln.dataset.vuln) return;
+      const data = await api("/api/remediation/" + encodeURIComponent(vuln.dataset.vuln));
+      document.getElementById("rem-title").textContent = data.title;
+      document.getElementById("rem-std").textContent = data.cis + " · " + data.gost;
+      document.getElementById("rem-mitre").textContent = (data.mitre || "") + " · " + (data.tactic || "") + " · " + (data.technique || "");
+      document.getElementById("rem-impact").textContent = (data.impact || "") + " " + (data.closure || "");
+      document.getElementById("rem-summary").textContent = data.summary;
+      document.getElementById("rem-steps").innerHTML = (data.steps || []).map((step) => `<li>${esc(step)}</li>`).join("");
+      document.getElementById("rem-code").textContent = data.powershell || "";
+      document.getElementById("remediation").classList.remove("hidden");
+    });
+    document.getElementById("rem-close").addEventListener("click", () => document.getElementById("remediation").classList.add("hidden"));
+    document.getElementById("rem-copy").addEventListener("click", () => navigator.clipboard.writeText(document.getElementById("rem-code").textContent));
+
+    async function loadNotify() {
+      try {
+        const data = await api("/api/notifications");
+        document.getElementById("smtp-server").value = data.smtp_server || "";
+        document.getElementById("smtp-port").value = data.smtp_port || 587;
+        document.getElementById("smtp-security").value = data.smtp_security || "starttls";
+        document.getElementById("smtp-user").value = data.smtp_user || "";
+        document.getElementById("smtp-from").value = data.smtp_from || "";
+        document.getElementById("smtp-pass").value = "";
+        document.getElementById("tg-chat").value = data.telegram_chat || "";
+        document.getElementById("tg-token").value = "";
+        document.getElementById("smtp-pass-set").textContent = data.smtp_password_set ? "Пароль SMTP сохранен" : "Пароль SMTP еще не задан";
+        document.getElementById("tg-token-set").textContent = data.telegram_token_set ? "Токен бота сохранен" : "Токен бота еще не задан";
+      } catch (error) { document.getElementById("run-log").textContent = error.message; }
+    }
+    function notifyPayload() {
+      return {
+        smtp_server: document.getElementById("smtp-server").value.trim(),
+        smtp_port: Number(document.getElementById("smtp-port").value || 587),
+        smtp_security: document.getElementById("smtp-security").value,
+        smtp_user: document.getElementById("smtp-user").value.trim(),
+        smtp_password: document.getElementById("smtp-pass").value,
+        smtp_from: document.getElementById("smtp-from").value.trim(),
+        telegram_token: document.getElementById("tg-token").value,
+        telegram_chat: document.getElementById("tg-chat").value.trim()
+      };
+    }
+    document.getElementById("mail-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      try { await api("/api/notifications", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(notifyPayload()) }); await loadNotify(); document.getElementById("run-log").textContent = "Почта сохранена"; }
+      catch (error) { document.getElementById("run-log").textContent = error.message; }
+    });
+    document.getElementById("tg-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      try { await api("/api/notifications", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(notifyPayload()) }); await loadNotify(); document.getElementById("run-log").textContent = "Telegram сохранен"; }
+      catch (error) { document.getElementById("run-log").textContent = error.message; }
+    });
+    document.getElementById("smtp-test").addEventListener("click", async () => {
+      try {
+        await api("/api/notifications", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(notifyPayload()) });
+        await api("/api/notifications/test-mail", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ recipient: document.getElementById("smtp-test-to").value.trim() }) });
+        document.getElementById("run-log").textContent = "Проверочное письмо отправлено";
+      } catch (error) { document.getElementById("run-log").textContent = error.message; }
+    });
+    async function loadAssistant() {
+      try {
+        const data = await api("/api/assistant");
+        document.getElementById("ai-enabled").checked = !!data.enabled;
+        document.getElementById("ai-url").value = data.api_url || "";
+        document.getElementById("ai-model").value = data.model_name || "";
+        document.getElementById("ai-key").value = "";
+        const note = { saved: "Ключ сохранен в настройках", env: "Сейчас используется ключ, заданный на сервере. Новое значение заменит его для ассистента.", none: "Ключ еще не задан" };
+        document.getElementById("ai-key-set").textContent = note[data.api_key_source] || note.none;
+      } catch (error) { document.getElementById("run-log").textContent = error.message; }
+    }
+    function assistantPayload() {
+      return { enabled: document.getElementById("ai-enabled").checked, api_url: document.getElementById("ai-url").value.trim(), model_name: document.getElementById("ai-model").value.trim(), api_key: document.getElementById("ai-key").value };
+    }
+    document.getElementById("ai-settings").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      try { await api("/api/assistant", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(assistantPayload()) }); await loadAssistant(); document.getElementById("run-log").textContent = "Модель ассистента сохранена"; }
+      catch (error) { document.getElementById("run-log").textContent = error.message; }
+    });
+    document.getElementById("ai-test").addEventListener("click", async () => {
+      try {
+        await api("/api/assistant", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(assistantPayload()) });
+        const data = await api("/api/assistant/test", { method: "POST" });
+        document.getElementById("run-log").textContent = data.answer || "Модель ответила";
+      } catch (error) { document.getElementById("run-log").textContent = error.message; }
+    });
+    function wikiRows(items) {
+      return `<table class="wiki-table"><tbody>${items.map((item) => `<tr><td class="wiki-id">${esc(item.id || "")}</td><td><b>${esc(item.title)}</b> ${esc(item.text)}</td></tr>`).join("")}</tbody></table>`;
+    }
+    function renderWiki() {
+      const box = document.getElementById("wiki-list");
+      if (!box) return;
+      const query = (document.getElementById("wiki-q").value || "").trim().toLowerCase();
+      const group = state.wikiGroup || "all";
+      const items = (window.BROSEC_WIKI || []).filter((item) => (group === "all" || item.g === group) && (!query || [item.id, item.title, item.text, item.family].join(" ").toLowerCase().includes(query)));
+      if (!items.length) { box.innerHTML = `<p class="muted">В справочнике ничего не найдено.</p>`; return; }
+      if (query) { box.innerHTML = wikiRows(items); return; }
+      const blocks = [
+        ["platform", "Проверки платформы"],
+        ["bloodhound", "BloodHound"]
+      ];
+      let html = blocks.filter(([key]) => group === "all" || group === key).map(([key, title]) => {
+        const rows = items.filter((item) => item.g === key);
+        if (!rows.length) return "";
+        return `<details class="acc tight" ${group === key ? "open" : ""}><summary>${title} · ${rows.length}</summary>${wikiRows(rows)}</details>`;
+      }).join("");
+      const castle = items.filter((item) => item.g === "pingcastle");
+      if (castle.length) {
+        const families = ["Устаревшее", "Привилегии", "Аномалии", "Доверия"];
+        html += `<details class="acc tight" ${group === "pingcastle" ? "open" : ""}><summary>PingCastle · ${castle.length}</summary><p>Индекс от 0 до 100: чем выше, тем хуже. Четыре раздела считаются отдельно, общий индекс — худший из них. В отчет платформы попадает правило, только если PingCastle дал ему баллы. 30 и выше — критический уровень, 15–29 — высокий, 5–14 — средний, меньше 5 — низкий.</p>${families.map((family) => { const part = castle.filter((item) => item.family === family); return part.length ? `<details class="acc tight"><summary>${family} · ${part.length}</summary>${wikiRows(part)}</details>` : ""; }).join("")}</details>`;
+      }
+      box.innerHTML = html;
+    }
+    document.getElementById("wiki-q").addEventListener("input", renderWiki);
+    document.getElementById("wiki-tabs").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-wiki]");
+      if (!button) return;
+      state.wikiGroup = button.dataset.wiki;
+      document.querySelectorAll("#wiki-tabs .chip").forEach((chip) => chip.classList.toggle("on", chip === button));
+      renderWiki();
+    });
+    document.getElementById("tg-test").addEventListener("click", async () => {
+      try {
+        await api("/api/notifications", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(notifyPayload()) });
+        await api("/api/notifications/test-telegram", { method: "POST" });
+        document.getElementById("run-log").textContent = "Проверочное сообщение ушло в Telegram";
+      } catch (error) { document.getElementById("run-log").textContent = error.message; }
+    });
+    document.getElementById("company-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const payload = { name: document.getElementById("c-name").value.trim(), domain: document.getElementById("c-domain").value.trim(), dc_host: document.getElementById("dc-host").value.trim(), dc_user: document.getElementById("c-user").value.trim(), dc_password: document.getElementById("c-pass").value, transport: document.getElementById("c-transport").value, directory_mode: document.getElementById("c-directory").value, runner_host: document.getElementById("c-runner").value.trim(), winrm_port: Number(document.getElementById("c-winrm").value || 5986), ssh_port: Number(document.getElementById("c-ssh").value || 22), ldap_port: Number(document.getElementById("c-ldap").value || 636), scan_hosts: document.getElementById("c-hosts").value, notify_email: document.getElementById("c-mail").value.trim(), telegram_chat: document.getElementById("c-tg").value.trim() };
+      try {
+        if (!companyId()) {
+          const created = await api("/api/companies", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: payload.name, domain: payload.domain, dc_host: "", dc_user: "", dc_password: "", transport: "none", winrm_port: 5985, ssh_port: 22, scan_hosts: "", notify_email: "" }) });
+          state.companyId = created.id;
+        }
+        await api("/api/companies/" + companyId(), { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+        await loadCompanies();
+        document.getElementById("run-log").textContent = t("saved");
+      }
+      catch (error) { document.getElementById("run-log").textContent = error.message; }
+    });
+    document.getElementById("run-btn").addEventListener("click", async () => {
+      const modules = [...document.querySelectorAll("#builder input:checked")].map((item) => item.value);
+      const button = document.getElementById("run-btn");
+      button.disabled = true;
+      document.getElementById("run-log").textContent = t("queued");
+      try {
+        const started = await api("/api/run-task", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ company_id: companyId(), domain_controller: document.getElementById("dc-host").value.trim(), modules }) });
+        const watch = async () => {
+          const scan = await api("/api/scans/" + started.scan_id);
+          document.getElementById("run-log").textContent = scan.status + "\n" + (scan.summary || "");
+          if (scan.status === "queued" || scan.status === "running") setTimeout(watch, 2000);
+          else { button.disabled = false; await loadDashboard(); }
+        };
+        setTimeout(watch, 1000);
+      } catch (error) { button.disabled = false; document.getElementById("run-log").textContent = error.message; }
+    });
+    document.getElementById("sched-btn").addEventListener("click", async () => {
+      try {
+        const data = await api("/api/schedule", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ company_id: companyId(), interval: document.getElementById("sched-interval").value, enabled: document.getElementById("sched-enabled").value === "true" }) });
+        document.getElementById("run-log").textContent = data.label;
+      } catch (error) { document.getElementById("run-log").textContent = error.message; }
+    });
+    document.getElementById("excel-btn").addEventListener("click", () => { window.location = "/api/export/excel?company_id=" + companyId(); });
+    document.getElementById("pdf-btn").addEventListener("click", () => { window.location = "/api/export/pdf?company_id=" + companyId(); });
+    document.getElementById("logout-btn").addEventListener("click", async () => { await api("/api/logout", { method: "POST" }); showLogin(); });
+    document.getElementById("clear-demo").addEventListener("click", async () => { await api("/api/demo-profile?company_id=" + companyId(), { method: "DELETE" }); await loadDashboard(); });
+    async function uploadPingcastle(file, statusId) {
+      if (!file) return;
+      const body = new FormData();
+      body.append("company_id", String(companyId()));
+      body.append("upload", file);
+      const status = document.getElementById(statusId);
+      try {
+        const data = await api("/api/import/pingcastle", { method: "POST", body });
+        const text = data.score + " / " + data.findings;
+        document.getElementById("run-log").textContent = text;
+        if (status) status.textContent = "Индекс " + text + ". Правила добавлены в общую статистику.";
+        await loadDashboard();
+      } catch (error) {
+        if (status) status.textContent = error.message;
+        else alert(error.message);
+      }
+    }
+    document.getElementById("xml-btn").addEventListener("click", () => uploadPingcastle(document.getElementById("xml-file").files[0], "pc-status"));
+    document.getElementById("pc-upload").addEventListener("click", () => uploadPingcastle(document.getElementById("pc-file").files[0], "pc-status"));
+    document.getElementById("sh-upload").addEventListener("click", async () => {
+      const file = document.getElementById("sh-file").files[0];
+      const status = document.getElementById("sh-status");
+      if (!file) return;
+      const body = new FormData();
+      body.append("company_id", String(companyId()));
+      body.append("upload", file);
+      status.textContent = "Архив передается в BloodHound CE...";
+      try {
+        const data = await api("/api/import/sharphound", { method: "POST", body });
+        status.textContent = data.message || "Архив принят.";
+        await loadDashboard();
+      } catch (error) { status.textContent = error.message; }
+    });
+    document.getElementById("t-btn").addEventListener("click", async () => {
+      try {
+        const created = await api("/api/companies", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: document.getElementById("t-name").value.trim(), domain: document.getElementById("t-domain").value.trim(), dc_host: "", dc_user: "", dc_password: "", transport: "winrm", winrm_port: 5986, ssh_port: 22, scan_hosts: "", notify_email: "" }) });
+        state.companyId = created.id;
+        document.getElementById("run-log").textContent = t("tenant.ok");
+        await loadCompanies();
+      } catch (error) { document.getElementById("run-log").textContent = error.message; }
+    });
+    document.getElementById("u-btn").addEventListener("click", async () => {
+      try {
+        await api("/api/users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: document.getElementById("u-name").value.trim(), password: document.getElementById("u-pass").value, full_name: document.getElementById("u-full").value.trim(), role: document.getElementById("u-role").value, company_id: companyId() }) });
+        document.getElementById("run-log").textContent = t("admin.ok");
+      } catch (error) { document.getElementById("run-log").textContent = error.message; }
+    });
+    document.getElementById("collector-btn").addEventListener("click", async () => {
+      try { const data = await api("/api/collector/script?company_id=" + companyId()); document.getElementById("collector-script").textContent = data.script; }
+      catch (error) { document.getElementById("collector-script").textContent = error.message; }
+    });
+    document.getElementById("collector-copy").addEventListener("click", () => navigator.clipboard.writeText(document.getElementById("collector-script").textContent));
+    document.getElementById("docs-open").addEventListener("click", () => document.querySelectorAll("#docs-ru details, #docs-en details").forEach((node) => { node.open = true; }));
+    document.getElementById("docs-close").addEventListener("click", () => document.querySelectorAll("#docs-ru details, #docs-en details").forEach((node) => { node.open = false; }));
+    document.getElementById("honey-btn").addEventListener("click", async () => {
+      try { const data = await api("/api/honeytokens/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ company_id: companyId() }) }); document.getElementById("honey-script").textContent = data.script; await loadDashboard(); }
+      catch (error) { document.getElementById("honey-script").textContent = error.message; }
+    });
+    document.getElementById("honey-copy").addEventListener("click", () => navigator.clipboard.writeText(document.getElementById("honey-script").textContent));
+
+    const INTRO = {
+      ru: [
+        ["Что это за система", "BroSec Audit AD показывает риски Active Directory: устаревшие системы, лишние привилегии, доверия без фильтрации SID и расхождение времени контроллеров. Общий балл при этом может еще не вырасти."],
+        ["Куда смотреть", "«Обзор» — сводка и графики. «Инциденты» — все проблемы с фильтрами. «Учетные записи» — люди и службы. «Устройства» — хосты. «Пути атак» — данные BloodHound и Kerberos."],
+        ["Первое сканирование", "Откройте «Настройки». Укажите контроллер и служебную учетную запись домена. Выберите LDAPS 636 или простой LDAP 389. PingCastle и SharpHound ставятся на Windows Server 2019 или на компьютер офицера, не на контроллер. Пока учетные данные не заданы, на экране демонстрационный профиль."],
+        ["Отчеты и справка", "«Отчеты» сравнивают два среза PingCastle и выгружают Excel и PDF. В шапке переключаются светлая тема и язык. Полное описание архитектуры и модулей лежит в «Документации». Настрой LDAP/LDAPS, установи BloodHound и PingCastle и приступай к сканированию!"]
+      ],
+      en: [
+        ["What this is", "BroSec Audit AD shows Active Directory risk before the overall score moves: old systems, extra privileges, trusts without SID filtering, and domain controller time skew."],
+        ["Where to look", "Overview is the scoreboard. Incidents is every finding with filters. Accounts are people and services. Devices are hosts. Attack Paths is BloodHound and Kerberos exposure."],
+        ["First scan", "Open Settings. Set the domain controller, WinRM or SSH, and a dedicated read account. Select modules and press Run. Until credentials are saved, the screen shows the demo profile."],
+        ["Reports and help", "Reports compares two PingCastle slices and exports Excel and PDF. The header switches the light theme and the language. Architecture and every module are in Documentation. Set LDAP or LDAPS, install BloodHound and PingCastle, and start the scan."]
+      ]
+    };
+    function openIntro(step) {
+      state.intro = step;
+      const pair = INTRO[state.lang][step];
+      document.getElementById("intro-title").textContent = pair[0];
+      document.getElementById("intro-body").textContent = pair[1];
+      [0, 1, 2, 3].forEach((i) => document.getElementById("s" + i).classList.toggle("on", i <= step));
+      document.getElementById("intro-prev").classList.toggle("hidden", step === 0);
+      document.getElementById("intro-next").textContent = step === 3 ? t("done") : t("next");
+      document.getElementById("intro").classList.remove("hidden");
+    }
+    document.getElementById("intro-next").addEventListener("click", () => {
+      if (state.intro >= 3) { localStorage.setItem("brosec-intro", "1"); document.getElementById("intro").classList.add("hidden"); return; }
+      openIntro(state.intro + 1);
+    });
+    document.getElementById("intro-prev").addEventListener("click", () => openIntro(Math.max(0, state.intro - 1)));
+
+    function renderMarkdown(source) {
+      const lines = String(source || "").replace(/\r\n/g, "\n").split("\n");
+      let html = "", index = 0;
+      const inline = (value) => esc(value).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+      while (index < lines.length) {
+        if (lines[index].trim().startsWith("|")) {
+          const block = [];
+          while (index < lines.length && lines[index].trim().startsWith("|")) block.push(lines[index++]);
+          const parsed = block.map((line) => line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim()));
+          const kept = parsed.filter((cells) => !cells.every((cell) => /^:?-+:?$/.test(cell)));
+          if (kept.length) {
+            html += "<table><thead><tr>" + kept[0].map((cell) => `<th>${inline(cell)}</th>`).join("") + "</tr></thead><tbody>";
+            kept.slice(1).forEach((cells) => { html += "<tr>" + cells.map((cell) => `<td>${inline(cell)}</td>`).join("") + "</tr>"; });
+            html += "</tbody></table>";
+          }
+          continue;
+        }
+        if (/^\s*[-*]\s+/.test(lines[index])) {
+          const items = [];
+          while (index < lines.length && /^\s*[-*]\s+/.test(lines[index])) items.push(lines[index++].replace(/^\s*[-*]\s+/, ""));
+          html += "<ul>" + items.map((item) => `<li>${inline(item)}</li>`).join("") + "</ul>";
+          continue;
+        }
+        if (!lines[index].trim()) { index += 1; continue; }
+        const paragraph = [];
+        while (index < lines.length && lines[index].trim() && !lines[index].trim().startsWith("|") && !/^\s*[-*]\s+/.test(lines[index])) paragraph.push(lines[index++]);
+        html += `<p>${inline(paragraph.join(" "))}</p>`;
+      }
+      return html;
+    }
+    function addBubble(kind, content, markdown) {
+      const node = document.createElement("div");
+      node.className = "bubble " + kind;
+      if (markdown) node.innerHTML = renderMarkdown(content); else node.textContent = content;
+      document.getElementById("ai-log").appendChild(node);
+      return node;
+    }
+    document.getElementById("ai-fab").addEventListener("click", () => document.getElementById("ai-panel").classList.toggle("open"));
+    document.getElementById("ai-close").addEventListener("click", () => document.getElementById("ai-panel").classList.remove("open"));
+    document.getElementById("ai-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const text = document.getElementById("ai-text").value.trim();
+      if (!text || !state.companyId) return;
+      document.getElementById("ai-text").value = "";
+      addBubble("user", text, false);
+      const pending = addBubble("bot", t("ai.wait"), false);
+      try { const data = await api("/api/ai-chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ company_id: companyId(), message: text }) }); pending.innerHTML = renderMarkdown(data.answer); }
+      catch (error) { pending.textContent = error.message; }
+    });
+    document.getElementById("winrm-guide").textContent = [
+      "# LDAPS: с сервера аудита до контроллера откройте TCP 636. Учетная запись — чтение каталога, формат DOMAIN\\user.",
+      "# WinRM нужен только для PingCastle.exe, SharpHound.exe, w32tm, SYSVOL и реестра.",
+      "Enable-PSRemoting -Force",
+      "winrm set winrm/config/service/auth '@{Basic=\"false\";Kerberos=\"true\";Negotiate=\"true\"}'",
+      "Set-Item WSMan:\\localhost\\Service\\AllowUnencrypted -Value $false",
+      "$cert = New-SelfSignedCertificate -DnsName $env:COMPUTERNAME -CertStoreLocation Cert:\\LocalMachine\\My",
+      "New-Item -Path WSMan:\\localhost\\Listener -Transport HTTPS -Address * -CertificateThumbprint $cert.Thumbprint -Force",
+      "New-NetFirewallRule -DisplayName 'BroSec Audit AD WinRM' -Direction Inbound -Protocol TCP -LocalPort 5986 -RemoteAddress <IP-сервера-аудита> -Action Allow"
+    ].join("\n");
+
+    applyTheme(state.theme);
+    applyI18n();
+    addBubble("bot", t("ai.hello"), false);
+    api("/api/me").then(boot).catch(() => showLogin());
+  </script>
+</body>
+</html>

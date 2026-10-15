@@ -1,0 +1,81 @@
+name: ad-audit
+
+services:
+  ad-security-core:
+    build: .
+    image: ad-identity-guard:2.2
+    container_name: ad-security-core
+    env_file: .env
+    ports:
+      - "9443:8000"
+    volumes:
+      - ./data:/opt/ad-audit/data
+      - ./reports:/opt/ad-audit/reports
+      - ./certs:/opt/ad-audit/certs
+    networks:
+      - audit-net
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import ssl,urllib.request; ctx=ssl._create_unverified_context(); urllib.request.urlopen('https://127.0.0.1:8000/health', context=ctx, timeout=5)",
+        ]
+      interval: 30s
+      timeout: 8s
+      retries: 5
+      start_period: 25s
+
+  app-db:
+    image: docker.io/library/postgres:18
+    container_name: ad-audit-bh-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    networks:
+      - audit-net
+    restart: unless-stopped
+
+  neo4j:
+    image: docker.io/library/neo4j:4.4.42
+    container_name: neo4j
+    environment:
+      NEO4J_AUTH: ${NEO4J_USER:?set NEO4J_USER}/${NEO4J_SECRET:?set NEO4J_SECRET}
+    volumes:
+      - neo4j-data:/data
+    networks:
+      - audit-net
+    restart: unless-stopped
+
+  bloodhound-ce:
+    image: docker.io/specterops/bloodhound:latest
+    container_name: bloodhound-ce
+    environment:
+      bhe_disable_cypher_complexity_limit: "false"
+      bhe_enable_cypher_mutations: "false"
+      bhe_database_connection: user=${POSTGRES_USER} password=${POSTGRES_PASSWORD} dbname=${POSTGRES_DB} host=app-db
+      bhe_neo4j_connection: neo4j://${NEO4J_USER}:${NEO4J_SECRET}@neo4j:7687/
+      bhe_graph_driver: neo4j
+      bhe_recreate_default_admin: "true"
+      bhe_default_admin_principal_name: ${BLOODHOUND_USER:?set BLOODHOUND_USER}
+      bhe_default_admin_password: ${BLOODHOUND_PASSWORD:?set BLOODHOUND_PASSWORD}
+      bhe_default_admin_email_address: admin@brosec.local
+    networks:
+      - audit-net
+    depends_on:
+      - app-db
+      - neo4j
+    restart: unless-stopped
+
+networks:
+  audit-net:
+    name: audit-net
+
+volumes:
+  neo4j-data:
+  postgres-data:

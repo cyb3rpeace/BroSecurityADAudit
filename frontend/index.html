@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" href="/static/logo.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BroSec Audit AD</title>
+    <script>
+      (function () {
+        var saved = localStorage.getItem("brosec-theme");
+        var theme = saved === "light" || saved === "cyber" ? saved : "dark";
+        document.documentElement.dataset.theme = theme;
+        if (theme !== "light") document.documentElement.classList.add("dark");
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
