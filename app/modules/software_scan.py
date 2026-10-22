@@ -571,7 +571,7 @@ _DC_EXTRA_PS = r"""
 $ErrorActionPreference = 'Continue'
 $since = (Get-Date).AddHours(-24)
 function Count-Id([int]$id) {
-  try { return @(Get-WinEvent -FilterHashtable @{LogName='Security'; Id=$id; StartTime=$since} -MaxEvents 20000 -ErrorAction Stop).Count }
+  try { return @(Get-WinEvent -FilterHashtable @{LogName='Security'; Id=$id; StartTime=$since} -MaxEvents 1500 -ErrorAction Stop).Count }
   catch {
     if ($_.Exception.Message -match 'No events were found') { return 0 }
     return -1
@@ -641,18 +641,20 @@ foreach ($z in $zones) {
   $scope = (([string]$z.ReplicationScope) -replace '\|','/')
   $rev = '0'
   if ($z.IsReverseLookupZone) { $rev = '1' }
-  Write-Output ('ZONE|' + $name + '|' + $type + '|' + $scope + '|' + $dyn + '|' + $xfer + '|' + $aging + '|' + $rev)
+  $signed = '0'
+  try { if ($z.IsSigned) { $signed = '1' } } catch {}
+  Write-Output ('ZONE|' + $name + '|' + $type + '|' + $scope + '|' + $dyn + '|' + $xfer + '|' + $aging + '|' + $rev + '|' + $signed)
 }
 $counted = 0
 foreach ($z in $zones) {
-  if ($counted -ge 12) { break }
+  if ($counted -ge 4) { break }
   $name = [string]$z.ZoneName
   if (-not $name) { continue }
   $bag = @{}
   $seen = 0
   foreach ($r in @(Get-DnsServerResourceRecord -ZoneName $name -ErrorAction SilentlyContinue)) {
     $seen++
-    if ($seen -gt 2000) { break }
+    if ($seen -gt 400) { break }
     $t = [string]$r.RecordType
     if (-not $t) { continue }
     if ($bag.ContainsKey($t)) { $bag[$t]++ } else { $bag[$t] = 1 }
@@ -712,6 +714,59 @@ Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue | Sele
     $emitted++
   }
 }
+$polSeen = 0
+Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue | Select-Object -First 20 | ForEach-Object {
+  if ($polSeen -ge 400) { return }
+  $guid = $_.Name
+  foreach ($hive in @('Machine','User')) {
+    $pol = Join-Path $_.FullName ($hive + '\Registry.pol')
+    if (-not (Test-Path -LiteralPath $pol)) { continue }
+    try { $bytes = [System.IO.File]::ReadAllBytes($pol) } catch { continue }
+    if ($bytes.Length -lt 8 -or $bytes[0] -ne 0x50 -or $bytes[1] -ne 0x52) { continue }
+    $offset = 8
+    $taken = 0
+    while ($offset -lt ($bytes.Length - 1) -and $taken -lt 20 -and $polSeen -lt 400) {
+      if (-not ($bytes[$offset] -eq 0x5B -and $bytes[$offset+1] -eq 0x00)) { break }
+      $offset += 2
+      $key = ''
+      while ($offset + 1 -lt $bytes.Length) {
+        $ch = [BitConverter]::ToChar($bytes, $offset); $offset += 2
+        if ($ch -eq [char]0) { break }
+        $key += $ch
+      }
+      $offset += 2
+      $name = ''
+      while ($offset + 1 -lt $bytes.Length) {
+        $ch = [BitConverter]::ToChar($bytes, $offset); $offset += 2
+        if ($ch -eq [char]0) { break }
+        $name += $ch
+      }
+      $offset += 2
+      if ($offset + 4 -gt $bytes.Length) { break }
+      $type = [BitConverter]::ToInt32($bytes, $offset); $offset += 4
+      $offset += 2
+      if ($offset + 4 -gt $bytes.Length) { break }
+      $size = [BitConverter]::ToInt32($bytes, $offset); $offset += 4
+      $offset += 2
+      $data = ''
+      if ($size -gt 0) {
+        if (($offset + $size) -gt $bytes.Length) { break }
+        if ($type -eq 4 -and $size -ge 4) { $data = [string][BitConverter]::ToInt32($bytes, $offset) }
+        elseif ($type -eq 1 -or $type -eq 2) { $data = [System.Text.Encoding]::Unicode.GetString($bytes, $offset, $size).Trim([char]0) }
+        else { $data = '[двоичное]' }
+        $offset += $size
+      }
+      if ($offset + 1 -lt $bytes.Length -and $bytes[$offset] -eq 0x5D) { $offset += 2 }
+      $label = (($key + '\' + $name) -replace '\|','/')
+      if ($label.Length -gt 90) { $label = $label.Substring($label.Length - 90) }
+      if ($label -match $secret -or $data -match $secret) { $data = '[скрыто]' }
+      if ($data.Length -gt 40) { $data = $data.Substring(0, 40) }
+      Write-Output ('REG|' + $guid + '|' + $label + '|' + ($data -replace '\|','/'))
+      $taken++
+      $polSeen++
+    }
+  }
+}
 Write-Output 'GPO_DONE'
 """
 
@@ -757,7 +812,7 @@ def controller_extra(connection: dict[str, Any], hosts: list[str]) -> list[dict[
             connection["winrm_port"],
             connection["ssh_port"],
             _DC_EXTRA_PS,
-            timeout=90,
+            timeout=45,
         )
         item: dict[str, Any] = {"host": checked, "ok": "DC_DONE" in (remote.get("stdout") or "")}
         if not item["ok"]:
@@ -826,7 +881,7 @@ def dns_zones(connection: dict[str, Any]) -> dict[str, Any]:
         connection["winrm_port"],
         connection["ssh_port"],
         _DNS_ZONE_PS,
-        timeout=150,
+        timeout=90,
     )
     stdout = remote.get("stdout") or ""
     if "DNS_DONE" not in stdout:
@@ -848,6 +903,7 @@ def dns_zones(connection: dict[str, Any]) -> dict[str, Any]:
                 "transfer": parts[5],
                 "aging": parts[6] == "1",
                 "reverse": parts[7] == "1",
+                "signed": len(parts) > 8 and parts[8] == "1",
             })
         elif line.startswith("STAT|"):
             parts = line.split("|", 2)
@@ -879,7 +935,7 @@ def dns_zones(connection: dict[str, Any]) -> dict[str, Any]:
 
 
 def gpo_conflicts(connection: dict[str, Any], names: dict[str, str]) -> dict[str, Any]:
-    """Сравнение параметров GptTmpl.inf. Значения, похожие на секрет, скрываются."""
+    """Сравнение GptTmpl.inf и части Registry.pol. Значения, похожие на секрет, скрываются."""
     remote = run_remote(
         connection["host"],
         connection["username"],
@@ -895,7 +951,7 @@ def gpo_conflicts(connection: dict[str, Any], names: dict[str, str]) -> dict[str
         return {"ok": False, "conflicts": [], "message": (remote.get("error") or remote.get("stderr") or "SYSVOL не прочитан")[:240]}
     bucket: dict[str, dict[str, str]] = {}
     for line in stdout.splitlines():
-        if not line.startswith("INF|"):
+        if not (line.startswith("INF|") or line.startswith("REG|")):
             continue
         parts = line.split("|", 3)
         if len(parts) < 4:
@@ -918,5 +974,5 @@ def gpo_conflicts(connection: dict[str, Any], names: dict[str, str]) -> dict[str
     return {
         "ok": True,
         "conflicts": conflicts,
-        "message": f"Сравнены параметры безопасности политик. Расхождений: {len(conflicts)}. Секреты в значения не попадают.",
+        "message": f"Сравнены шаблон безопасности и реестр политик. Расхождений: {len(conflicts)}. Секреты в значения не попадают.",
     }

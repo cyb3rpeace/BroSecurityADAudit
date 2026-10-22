@@ -1,5 +1,33 @@
 export const RELEASES = [
   {
+    version: "2.6.10",
+    ru: [
+      "В справочнике у каждой проверки есть простое объяснение, техническое и ссылка на источник Microsoft или MITRE.",
+      "Каталог на обзоре показывает, какие разделы отчётов оценки каталога уже внутри, а какие ещё частичные.",
+      "Настрой LDAP/LDAPS, установи BloodHound и приступай к сканированию!",
+    ],
+    en: [
+      "Every reference article now has a plain explanation, a technical one, and a Microsoft or MITRE source.",
+      "The catalog overview shows which assessment sections are present and which are still partial.",
+      "Set LDAP or LDAPS, install BloodHound, and start the scan.",
+    ],
+  },
+  {
+    version: "2.6.9",
+    ru: [
+      "У контроллеров в каталоге видны процессор, память и диск. Зоны DNS показывают DNSSEC, обновления и передачу.",
+      "Расхождения политик считаются и по шаблону безопасности, и по Registry.pol. Значения, похожие на пароль, скрыты.",
+      "Для Telegram можно указать прокси адрес:порт. Токен берётся у BotFather, идентификатор канала виден в getUpdates.",
+      "Настрой LDAP/LDAPS, установи BloodHound и приступай к сканированию!",
+    ],
+    en: [
+      "Controller cards show CPU, memory, and disk. DNS zones show DNSSEC, updates, and transfer.",
+      "Policy differences include the security template and part of Registry.pol. Password-like values stay hidden.",
+      "Telegram can use a host:port proxy. The token comes from BotFather, and the channel id comes from getUpdates.",
+      "Set LDAP or LDAPS, install BloodHound, and start the scan.",
+    ],
+  },
+  {
     version: "2.6.8",
     ru: [
       "Харденинг смотрит аудит изменений каталога и опасные права на корне домена, AdminSDHolder и подразделении контроллеров.",

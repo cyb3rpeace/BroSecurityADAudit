@@ -76,6 +76,7 @@ class NotifyChannel(Base):
     smtp_from = Column(String(255), default="")
     telegram_token = Column(String(255), default="")
     telegram_chat = Column(String(64), default="")
+    telegram_proxy = Column(String(128), default="")
     prefs = Column(Text, default="")
 
 
@@ -264,6 +265,8 @@ def _ensure_columns() -> None:
         notify_names = {row[1] for row in conn.execute(text("PRAGMA table_info(notify_channel)")).fetchall()}
         if notify_names and "prefs" not in notify_names:
             conn.execute(text("ALTER TABLE notify_channel ADD COLUMN prefs TEXT DEFAULT ''"))
+        if notify_names and "telegram_proxy" not in notify_names:
+            conn.execute(text("ALTER TABLE notify_channel ADD COLUMN telegram_proxy VARCHAR(128) DEFAULT ''"))
         user_names = {row[1] for row in conn.execute(text("PRAGMA table_info(users)")).fetchall()}
         for name, ddl in (
             ("email", "VARCHAR(255) DEFAULT ''"),

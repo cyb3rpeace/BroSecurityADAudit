@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { PageHead } from "@/components/bits"
 import type { WikiItem } from "@/lib/types"
 import { KNOWLEDGE } from "@/lib/knowledge"
+import { technicalOf } from "@/lib/check-depth"
 import { useApp } from "@/app-state"
 
 function loadWiki() {
@@ -144,10 +145,13 @@ export function Docs() {
 
 function CheckArticle({ item, copied, onCopy }: { item: WikiItem; copied: string; onCopy: (id: string) => void }) {
   const rich = KNOWLEDGE.find((row) => row.id === item.id)
+  const depth = technicalOf(item)
+  const links = [...(rich?.links || []), ...depth.links.filter((link) => !(rich?.links || []).some((row) => row.href === link.href))]
   const letter = rich?.letter || `Коллеги, проверка «${item.title}» отмечена в BroSec. ${item.impact || item.text} Просьба: ${item.fix || "закрыть замечание и сообщить, когда можно перепроверить"}.`
   return (
     <div className="grid gap-4 text-sm">
-      <section><h3 className="font-medium">Что это</h3><p className="text-muted-foreground">{rich?.what || item.what || item.text}</p></section>
+      <section><h3 className="font-medium">Простым языком</h3><p className="text-muted-foreground">{rich?.what || item.what || item.text}</p></section>
+      <section><h3 className="font-medium">Технически</h3><p>{depth.tech}</p></section>
       <section><h3 className="font-medium">Зачем это существует</h3><p>{rich?.why || "Параметр или программа оставлены в состоянии, которое ослабляет контроль домена."}</p></section>
       <section><h3 className="font-medium">Чем кончается</h3><p>{rich?.impact || item.impact || item.text}</p></section>
       <section>
@@ -161,12 +165,10 @@ function CheckArticle({ item, copied, onCopy }: { item: WikiItem; copied: string
           {copied === (item.id || item.title) ? "Скопировано" : "Скопировать текст письма"}
         </Button>
       </section>
-      {rich?.links.length ? (
-        <section className="grid gap-1">
-          <h3 className="font-medium">Источники</h3>
-          {rich.links.map((link) => <a key={link.href} className="text-primary underline" href={link.href} target="_blank" rel="noreferrer">{link.title}</a>)}
-        </section>
-      ) : null}
+      <section className="grid gap-1">
+        <h3 className="font-medium">Источники</h3>
+        {links.map((link) => <a key={link.href} className="text-primary underline" href={link.href} target="_blank" rel="noreferrer">{link.title}</a>)}
+      </section>
     </div>
   )
 }

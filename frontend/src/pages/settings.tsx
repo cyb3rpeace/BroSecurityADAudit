@@ -144,7 +144,7 @@ export function Settings() {
 
 function Channels() {
   const [mail, setMail] = useState({ smtp_server: "", smtp_port: "587", smtp_security: "starttls", smtp_user: "", smtp_password: "", smtp_from: "", test_to: "", pass_set: "" })
-  const [tg, setTg] = useState({ token: "", chat: "", token_set: "" })
+  const [tg, setTg] = useState({ token: "", chat: "", proxy: "", token_set: "" })
   const [ai, setAi] = useState({ enabled: false, api_url: "", model_name: "", api_key: "", note: "" })
 
   useEffect(() => {
@@ -158,7 +158,7 @@ function Channels() {
         smtp_from: String(data.smtp_from || ""),
         pass_set: data.smtp_password_set ? "Пароль SMTP сохранен" : "Пароль SMTP еще не задан",
       }))
-      setTg((current) => ({ ...current, chat: String(data.telegram_chat || ""), token_set: data.telegram_token_set ? "Токен бота сохранен" : "Токен бота еще не задан" }))
+      setTg((current) => ({ ...current, chat: String(data.telegram_chat || ""), proxy: String(data.telegram_proxy || ""), token_set: data.telegram_token_set ? "Токен бота сохранен" : "Токен бота еще не задан" }))
     }).catch((error: unknown) => toast.error(error instanceof Error ? error.message : "Каналы не прочитаны"))
     void api<{ enabled: boolean; api_url: string; model_name: string; api_key_source: string }>("/api/assistant").then((data) => {
       const note = { saved: "Ключ сохранен в настройках", env: "Сейчас используется ключ, заданный на сервере.", none: "Ключ еще не задан" }[data.api_key_source] || "Ключ еще не задан"
@@ -176,6 +176,7 @@ function Channels() {
       smtp_from: mail.smtp_from.trim(),
       telegram_token: tg.token,
       telegram_chat: tg.chat.trim(),
+      telegram_proxy: tg.proxy.trim(),
     }
   }
 
@@ -215,9 +216,13 @@ function Channels() {
       <Card>
         <CardHeader><CardTitle>Telegram</CardTitle></CardHeader>
         <CardContent className="grid gap-2">
+          <p className="text-muted-foreground text-xs">В Telegram откройте @BotFather, отправьте /newbot и скопируйте токен вида 123456:ABC. Пустое поле токен не меняет.</p>
           <Input type="password" value={tg.token} placeholder="Токен бота, пусто — не менять" onChange={(event) => setTg({ ...tg, token: event.target.value })} />
           <p className="text-muted-foreground text-xs">{tg.token_set}</p>
-          <Input value={tg.chat} placeholder="Chat id общего чата" onChange={(event) => setTg({ ...tg, chat: event.target.value })} />
+          <p className="text-muted-foreground text-xs">Добавьте бота в канал администратором и опубликуйте сообщение. Затем напишите боту в личку и откройте в браузере адрес api.telegram.org/botВАШ_ТОКЕН/getUpdates. В ответе у канала chat.id начинается с -100. Это и есть идентификатор.</p>
+          <Input value={tg.chat} placeholder="Chat id канала, например -1001234567890" onChange={(event) => setTg({ ...tg, chat: event.target.value })} />
+          <p className="text-muted-foreground text-xs">С этого сервера api.telegram.org часто недоступен напрямую. Укажите HTTP-прокси на VPS за пределами сети: адрес и порт.</p>
+          <Input value={tg.proxy} placeholder="203.0.113.10:3128" onChange={(event) => setTg({ ...tg, proxy: event.target.value })} />
           <div className="flex gap-2">
             <Button onClick={() => void saveNotify("Telegram сохранен").catch((error: unknown) => toast.error(error instanceof Error ? error.message : "Telegram не сохранился"))}>Сохранить Telegram</Button>
             <Button variant="outline" onClick={() => void saveNotify("Telegram сохранен").then(() => api("/api/notifications/test-telegram", { method: "POST" })).then(() => toast.success("Проверочное сообщение ушло в Telegram")).catch((error: unknown) => toast.error(error instanceof Error ? error.message : "Telegram не ответил"))}>Проверить</Button>

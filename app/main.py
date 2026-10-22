@@ -75,7 +75,7 @@ try:
 except Exception:
     TZ = ZoneInfo("UTC")
 
-PRODUCT_VERSION = "2.6.8"
+PRODUCT_VERSION = "2.6.10"
 
 ALLOWED_MODULES = (
     "bloodhound",
@@ -327,6 +327,16 @@ def company_public(company: Company) -> dict[str, Any]:
     }
 
 
+def clean_proxy(value: str) -> str:
+    raw = (value or "").strip()
+    if not raw:
+        return ""
+    match = re.fullmatch(r"([A-Za-z0-9.-]{1,253}):(\d{1,5})", raw)
+    if not match or not 1 <= int(match.group(2)) <= 65535:
+        raise HTTPException(status_code=400, detail="Прокси Telegram: укажите адрес и порт, например 203.0.113.10:3128")
+    return raw
+
+
 def channel_row(db: Session) -> NotifyChannel:
     row = db.get(NotifyChannel, 1)
     if row is None:
@@ -358,6 +368,7 @@ def channel_public(row: NotifyChannel) -> dict[str, Any]:
         "smtp_password_set": bool(row.smtp_password),
         "telegram_chat": row.telegram_chat or "",
         "telegram_token_set": bool(row.telegram_token),
+        "telegram_proxy": row.telegram_proxy or "",
     }
 
 
@@ -1121,7 +1132,7 @@ def execute_scan(scan_id: int) -> None:
         mail_text = alert_body(prefs, "mail", status_key, text, collected)
         tg_text = alert_body(prefs, "telegram", status_key, text, collected)
         telegram = (
-            send_summary(tg_text, str(pdf_path) if pdf_path else None, channel.telegram_token, chat)
+            send_summary(tg_text, str(pdf_path) if pdf_path else None, channel.telegram_token, chat, channel.telegram_proxy)
             if tg_text else {"ok": True}
         )
         mail = (
@@ -1708,6 +1719,7 @@ class NotifyIn(BaseModel):
     smtp_from: str = ""
     telegram_token: str | None = None
     telegram_chat: str = ""
+    telegram_proxy: str = ""
 
 
 class NotifyTestIn(BaseModel):
@@ -1739,6 +1751,7 @@ def notifications_put(payload: NotifyIn, user: User = Depends(get_user), db: Ses
     row.smtp_user = payload.smtp_user.strip()
     row.smtp_from = payload.smtp_from.strip()
     row.telegram_chat = payload.telegram_chat.strip()
+    row.telegram_proxy = clean_proxy(payload.telegram_proxy)
     if payload.smtp_password:
         row.smtp_password = payload.smtp_password
     if payload.telegram_token:
@@ -1812,6 +1825,7 @@ def notifications_test_telegram(user: User = Depends(get_user), db: Session = De
         None,
         row.telegram_token,
         row.telegram_chat,
+        row.telegram_proxy,
     )
     if not result.get("ok"):
         raise HTTPException(status_code=502, detail=str(result.get("error") or "Telegram не ответил"))

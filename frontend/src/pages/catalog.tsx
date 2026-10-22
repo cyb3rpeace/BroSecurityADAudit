@@ -44,6 +44,7 @@ type ZoneRow = {
   transfer: string
   aging: boolean
   reverse: boolean
+  signed?: boolean
 }
 
 type WindowsView = {
@@ -81,6 +82,17 @@ function shortName(value: string) {
 function sameHost(left: string, right: string) {
   if (!left || !right) return false
   return left.toLowerCase() === right.toLowerCase() || shortName(left) === shortName(right)
+}
+
+function Meter({ label, used }: { label: string; used: number }) {
+  const width = Math.max(0, Math.min(100, used))
+  const tone = width >= 90 ? "bg-red-500" : width >= 75 ? "bg-amber-400" : "bg-cyan-400"
+  return (
+    <div>
+      <div className="mb-1 flex justify-between text-[11px]"><span>{label}</span><span>{width}%</span></div>
+      <div className="bg-muted h-2 overflow-hidden rounded-full"><div className={"h-full " + tone} style={{ width: width + "%" }} /></div>
+    </div>
+  )
 }
 
 function Kpis({ items }: { items: { label: string; value: string; bad?: boolean }[] }) {
@@ -330,6 +342,28 @@ export function Catalog() {
                     })()}
                     <p className="text-muted-foreground mt-2 text-xs">Розовая доля — группы безопасности, голубая — рассылки. Участники открываются на вкладке «Группы и OU».</p>
                   </div>
+                  <div className="rounded-xl border p-4 sm:col-span-2">
+                    <div className="mb-2 text-sm font-medium">Покрытие отчётов оценки каталога</div>
+                    <div className="grid gap-2">
+                      {[
+                        ["Обзор", "есть", "Число сайтов, контроллеров, политика и состав групп. Кольцевые диаграммы объектов и полосы ОС ещё не перенесены."],
+                        ["Топология", "часть", "Сайты, роли и таблица репликации. Нет масштабируемой карты леса и отдельной матрицы всех разделов."],
+                        ["Контроллеры", "часть", "Процессор, память и диск на карточке. Нет BIOS, сетевых адаптеров, томов и размера базы каталога."],
+                        ["Учётные записи", "часть", "Политика, PSO, LAPS и krbtgt из уже найденных инцидентов. Нет списков пароль-не-истекает, без AES и компьютеров по ОС."],
+                        ["Группы и OU", "часть", "Тип группы и первые участники. Нет дерева подразделений с привязанными политиками."],
+                        ["DNS", "часть", "Свойства зоны, DNSSEC, передача, очистка и доли типов. Нет условных пересылок, очистки на сервере и устаревших записей контроллеров. Имена записей не копируются."],
+                        ["Доверия", "часть", "Направление и фильтрация SID. Нет проверки доступности партнёра."],
+                        ["Политики", "часть", "Сравнение GptTmpl.inf и части Registry.pol. Нет имён ADMX, WMI-фильтров и сверки с базовой линией."],
+                        ["Поза контроллера", "часть", "Подпись, время и службы из уже открытых отметок. Нет dcdiag и полного набора параметров реестра из отдельного отчёта."],
+                      ].map(([title, state, note]) => (
+                        <div key={title} className="grid gap-1 border-t pt-2 first:border-t-0 first:pt-0 sm:grid-cols-[140px_72px_1fr] sm:items-start">
+                          <div className="text-sm font-medium">{title}</div>
+                          <div className={"text-xs " + (state === "есть" ? "text-emerald-500" : "text-amber-500")}>{state}</div>
+                          <div className="text-muted-foreground text-xs">{note}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               ) : null}
               {tab === "topology" ? (
@@ -434,6 +468,7 @@ export function Catalog() {
                     { label: "Служебные SRV", value: (windows?.dns?.locator || []).filter((row) => row.ok).length + " из " + ((windows?.dns?.locator || []).length || "…") },
                     { label: "Подстановка", value: windows?.dns?.wildcard ? "есть" : "нет", bad: !!windows?.dns?.wildcard },
                     { label: "Открытая передача", value: String((windows?.dns?.zones || []).filter((row) => /any/i.test(row.transfer)).length), bad: (windows?.dns?.zones || []).some((row) => /any/i.test(row.transfer)) },
+                    { label: "Без DNSSEC", value: String((windows?.dns?.zones || []).filter((row) => row.signed === false).length) },
                   ]} />
                   <div className="flex flex-wrap gap-2">
                     {(windows?.dns?.locator || []).map((row) => (
@@ -464,20 +499,21 @@ export function Catalog() {
                     <div className="overflow-auto rounded-xl border">
                       <table className="w-full min-w-[760px] text-left text-sm">
                         <thead className="bg-muted/50 text-xs">
-                          <tr>{["Зона", "Тип", "Область", "Обновления", "Передача", "Очистка"].map((head) => <th key={head} className="px-3 py-2 font-medium">{head}</th>)}</tr>
+                          <tr>{["Зона", "Тип", "Область", "Обновления", "Передача", "Очистка", "DNSSEC"].map((head) => <th key={head} className="px-3 py-2 font-medium">{head}</th>)}</tr>
                         </thead>
                         <tbody>
                           {windows.dns.zones.filter((row) => hit(row.name + row.type + row.dynamic)).map((row) => {
                             const openTransfer = /any/i.test(row.transfer)
                             const openUpdate = /nonsecure/i.test(row.dynamic)
                             return (
-                              <tr key={row.name} className="hover:bg-muted/40 cursor-pointer border-t" onClick={() => setPick({ title: row.name, lines: [row.type + (row.reverse ? ", обратная" : ""), "Область: " + (row.scope || "не указана"), "Обновления: " + (row.dynamic || "не прочитаны"), "Передача: " + (row.transfer || "не прочитана"), row.aging ? "Очистка устаревших записей включена" : "Очистка устаревших записей выключена", "Содержимое зоны не выгружалось."] })}>
+                              <tr key={row.name} className="hover:bg-muted/40 cursor-pointer border-t" onClick={() => setPick({ title: row.name, lines: [row.type + (row.reverse ? ", обратная" : ""), "Область: " + (row.scope || "не указана"), "Обновления: " + (row.dynamic || "не прочитаны"), "Передача: " + (row.transfer || "не прочитана"), row.aging ? "Очистка устаревших записей включена" : "Очистка устаревших записей выключена", row.signed ? "DNSSEC включён" : "DNSSEC не включён", "Имена записей не копировались."] })}>
                                 <td className="px-3 py-2">{row.name}</td>
                                 <td className="px-3 py-2">{row.type}</td>
                                 <td className="px-3 py-2">{row.scope || "—"}</td>
                                 <td className="px-3 py-2"><span className={openUpdate ? "text-red-600" : ""}>{row.dynamic || "—"}</span></td>
                                 <td className="px-3 py-2"><span className={openTransfer ? "text-red-600" : ""}>{row.transfer || "—"}</span></td>
                                 <td className="px-3 py-2">{row.aging ? "включена" : "выключена"}</td>
+                                <td className="px-3 py-2">{row.signed ? "да" : "нет"}</td>
                               </tr>
                             )
                           })}
@@ -577,6 +613,24 @@ export function Catalog() {
                     { label: "Связи не в норме", value: String((windows?.replication || []).filter((row) => row.state !== "норма").length), bad: (windows?.replication || []).some((row) => row.state !== "норма") },
                     { label: "Журнал недоступен", value: String((windows?.controllers || []).filter((row) => row.failed_24h === "-1").length), bad: (windows?.controllers || []).some((row) => row.failed_24h === "-1") },
                   ]} />
+                  <div className="grid gap-3 md:grid-cols-2">
+                    {(picture.dcs || []).filter((row) => hit(row.name + row.host + row.os)).map((row) => {
+                      const extra = (windows?.controllers || []).find((item) => sameHost(item.host, row.host) || sameHost(item.host, row.name))
+                      const ramFree = Number(extra?.ram_free_pct)
+                      const diskFree = Number(extra?.disk_free_pct)
+                      return (
+                        <button key={row.name} type="button" className="hover:bg-muted/40 rounded-xl border p-3 text-left" onClick={() => setPick({ title: row.name, lines: [row.host || "имя узла не прочитано", row.os || "ОС не прочитана", extra?.maker ? extra.maker + " " + (extra.model || "") : "Модель ещё читается", extra?.cpu || "Процессор не прочитан", extra?.ram_gb ? "Память " + extra.ram_gb + " ГБ" : "Память ещё читается", "Текст событий не читается"] })}>
+                          <div className="font-medium">{row.name}</div>
+                          <div className="text-muted-foreground mt-1 text-xs">{row.os || "ОС не прочитана"}</div>
+                          <div className="mt-2 text-xs">{extra?.cpu || "Процессор ещё читается"}</div>
+                          <div className="mt-3 grid gap-2">
+                            {extra?.ram_gb ? <Meter label={"Память занята, всего " + extra.ram_gb + " ГБ"} used={Number.isFinite(ramFree) ? 100 - ramFree : 0} /> : <p className="text-muted-foreground text-xs">Память ещё читается.</p>}
+                            {extra?.disk_free_pct ? <Meter label="Диск занят" used={Number.isFinite(diskFree) ? 100 - diskFree : 0} /> : <p className="text-muted-foreground text-xs">Диск ещё читается.</p>}
+                          </div>
+                        </button>
+                      )
+                    })}
+                  </div>
                 <div className="overflow-auto rounded-xl border">
                   <table className="w-full min-w-[720px] text-left text-sm">
                     <thead className="bg-muted/50 text-xs">
