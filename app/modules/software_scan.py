@@ -569,14 +569,6 @@ _SECRET_KEY = re.compile(r"(?i)password|cpassword|pwd|passwd|secret")
 
 _DC_EXTRA_PS = r"""
 $ErrorActionPreference = 'Continue'
-$since = (Get-Date).AddHours(-24)
-function Count-Id([int]$id) {
-  try { return @(Get-WinEvent -FilterHashtable @{LogName='Security'; Id=$id; StartTime=$since} -MaxEvents 1500 -ErrorAction Stop).Count }
-  catch {
-    if ($_.Exception.Message -match 'No events were found') { return 0 }
-    return -1
-  }
-}
 try {
   $cs = Get-CimInstance Win32_ComputerSystem
   $os = Get-CimInstance Win32_OperatingSystem
@@ -621,7 +613,6 @@ try {
     if ($biosVer) { Write-Output ('BIOS|' + $biosVer) }
   } catch {}
 } catch { Write-Output 'HW_FAIL' }
-Write-Output ('COUNT|' + (Count-Id 4625) + '|' + (Count-Id 4740))
 try {
   Import-Module ActiveDirectory -ErrorAction Stop
   $now = Get-Date
@@ -662,6 +653,20 @@ foreach ($test in @('Advertising','Replications','NetLogons','Services','FSMOChe
   Write-Output ('DIAG|' + $test + '|' + $(if ($bad) { '0' } else { '1' }))
 }
 Write-Output 'DIAG_DONE'
+"""
+
+_COUNT_PS = r"""
+$ErrorActionPreference = 'Continue'
+$since = (Get-Date).AddHours(-24)
+function Count-Id([int]$id) {
+  try { return @(Get-WinEvent -FilterHashtable @{LogName='Security'; Id=$id; StartTime=$since} -MaxEvents 400 -ErrorAction Stop).Count }
+  catch {
+    if ($_.Exception.Message -match 'No events were found') { return 0 }
+    return -1
+  }
+}
+Write-Output ('COUNT|' + (Count-Id 4625) + '|' + (Count-Id 4740))
+Write-Output 'COUNT_DONE'
 """
 
 _DNS_ZONE_PS = r"""
@@ -886,13 +891,17 @@ def last_interactive_user(connection: dict[str, Any], host: str) -> str:
     return ""
 
 
-def controller_extra(connection: dict[str, Any], hosts: list[str]) -> list[dict[str, Any]]:
+def controller_extra(connection: dict[str, Any], hosts: list[str], with_counts: bool = True, with_diag: bool = True) -> list[dict[str, Any]]:
     """Железо и счётчики входов по контроллерам. Сообщения журнала не сохраняются."""
     rows = []
+    port = int(connection["ssh_port"] if connection.get("transport") == "ssh" else connection.get("winrm_port") or 5985)
     for index, host in enumerate(hosts[:6]):
         try:
             checked = validate_host(host)
         except ValueError:
+            continue
+        if not _port_open(checked, port, timeout=2.0):
+            rows.append({"host": checked, "ok": False, "detail": "WinRM не открыт"})
             continue
         remote = run_remote(
             checked,
@@ -951,7 +960,25 @@ def controller_extra(connection: dict[str, Any], hosts: list[str]) -> list[dict[
                 item["repl_ok"] = False
         if "repl_ok" not in item:
             item["repl_ok"] = "partners" in item or "REPL_FAIL" not in (remote.get("stdout") or "")
-        if index == 0:
+        if with_counts:
+            counted = run_remote(
+                checked,
+                connection["username"],
+                connection["password"],
+                connection["transport"],
+                connection["winrm_port"],
+                connection["ssh_port"],
+                _COUNT_PS,
+                timeout=12,
+            )
+            for line in (counted.get("stdout") or "").splitlines():
+                if not line.startswith("COUNT|"):
+                    continue
+                parts = line.split("|")
+                if len(parts) >= 3:
+                    item["failed_24h"] = parts[1]
+                    item["locked_24h"] = parts[2]
+        if with_diag and index == 0:
             diag = run_remote(
                 checked,
                 connection["username"],

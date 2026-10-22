@@ -1,5 +1,18 @@
 export const RELEASES = [
   {
+    version: "2.6.13",
+    ru: [
+      "На обзоре критичность открывает инциденты с этим фильтром. Области каталога открывают учётные записи, устройства и пути атак.",
+      "Память и процессор контроллера читаются отдельным коротким запросом и не ждут журнал, DNS и политики.",
+      "Настрой LDAP/LDAPS, установи BloodHound и приступай к сканированию!",
+    ],
+    en: [
+      "Overview severity opens incidents with that filter. Catalog areas open accounts, devices, and attack paths.",
+      "Controller memory and CPU arrive in a short request and no longer wait for the log, DNS, and policies.",
+      "Set LDAP or LDAPS, install BloodHound, and start the scan.",
+    ],
+  },
+  {
     version: "2.6.12",
     ru: [
       "Каталог рисует дерево подразделений и домены леса. DNS отмечает устаревшие цели служебных записей контроллеров.",

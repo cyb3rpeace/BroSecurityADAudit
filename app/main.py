@@ -75,7 +75,7 @@ try:
 except Exception:
     TZ = ZoneInfo("UTC")
 
-PRODUCT_VERSION = "2.6.12"
+PRODUCT_VERSION = "2.6.13"
 
 ALLOWED_MODULES = (
     "bloodhound",
@@ -2185,7 +2185,7 @@ def directory_picture_api(company_id: int, user: User = Depends(get_user), db: S
 
 
 @app.get("/api/directory/windows")
-def directory_windows(company_id: int, user: User = Depends(get_user), db: Session = Depends(get_db)) -> dict[str, Any]:
+def directory_windows(company_id: int, part: str = "", user: User = Depends(get_user), db: Session = Depends(get_db)) -> dict[str, Any]:
     company = resolve_company(user, db, company_id)
     if windows_mode_of(company) not in {"winrm", "ssh"} or not company.dc_host or not company.dc_user or not company.dc_password:
         return {"ok": False, "controllers": [], "conflicts": [], "message": "WinRM к контроллеру не задан"}
@@ -2211,7 +2211,21 @@ def directory_windows(company_id: int, user: User = Depends(get_user), db: Sessi
             names[guid.strip("{}")] = title
     win = windows_connection(connection_from(company, company.dc_host))
     win["transport"] = windows_mode_of(company)
-    controllers = controller_extra(win, hosts)
+    fast = part == "hw"
+    controllers = controller_extra(win, hosts, with_counts=not fast, with_diag=not fast)
+    if fast:
+        matrix = []
+        for row in controllers:
+            for partner in row.get("partners") or []:
+                matrix.append({"source": row.get("host") or "", **partner})
+        readable = sum(1 for row in controllers if row.get("ok"))
+        return {
+            "ok": bool(readable),
+            "controllers": controllers,
+            "conflicts": [],
+            "replication": matrix[:80],
+            "message": f"Железо контроллеров: ответило {readable} из {len(hosts[:6])}.",
+        }
     diff = gpo_conflicts(win, names)
     zones = dns_zones(win)
     zones["wildcard"] = bool(picture.get("wildcard"))

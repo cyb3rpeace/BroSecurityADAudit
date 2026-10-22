@@ -9,7 +9,7 @@ import { api } from "@/lib/api"
 import { useApp } from "@/app-state"
 
 export function Overview() {
-  const { t, theme, inventory, timeline, compare, mitre, filters, patchFilters, openFinding, demo, companyId, company, reload } = useApp()
+  const { t, theme, inventory, timeline, compare, mitre, filters, patchFilters, openFinding, demo, companyId, company, reload, setView } = useApp()
   const rows = incidentsOf(inventory)
   const colors = palette(theme)
   const crit = rows.filter((row) => row.severity === "critical").length
@@ -34,6 +34,20 @@ export function Overview() {
     .filter((row) => matchesQuery(row, filters.q) && (!filters.tactic || row.tactic === filters.tactic))
     .sort((a, b) => rank(a) - rank(b))
     .slice(0, 8)
+
+  function openSeverity(name: string) {
+    const sev = order.find((key) => t("sev." + key) === name) || ""
+    if (!sev) return
+    patchFilters({ sev, status: "", category: "", source: "", tactic: "" })
+    setView("incidents")
+  }
+
+  function openArea(name: string) {
+    const view = name === "Учетные записи" ? "accounts" : name === "Устройства" ? "devices" : name === "Пути" ? "paths" : ""
+    if (!view) return
+    patchFilters({ sev: "", status: "", category: "", source: "", tactic: "" })
+    setView(view)
+  }
 
   async function clearDemo() {
     if (!companyId) return
@@ -76,8 +90,8 @@ export function Overview() {
         <Card>
           <CardHeader><CardTitle>{t("chart.dist")}</CardTitle></CardHeader>
           <CardContent>
-            <Donut slices={slices} />
-            <LegendButtons items={slices} active="" onPick={() => undefined} />
+            <Donut slices={slices} onSlice={openSeverity} />
+            <LegendButtons items={slices} active="" onPick={openSeverity} />
           </CardContent>
         </Card>
       </div>
@@ -85,7 +99,8 @@ export function Overview() {
         <Card>
           <CardHeader><CardTitle>Области каталога</CardTitle></CardHeader>
           <CardContent>
-            <Bars rows={areaRows} active="" colors={colors.bar} onPick={() => undefined} />
+            <Bars rows={areaRows} active="" colors={colors.bar} onPick={openArea} />
+            <p className="text-muted-foreground mt-2 text-xs">Учетные записи и устройства открывают свои вкладки. «Пути» — это вкладка «Пути атак»: делегирование, учётные записи со SPN, шаблоны сертификатов и опасные права. Это не сетевой маршрут.</p>
           </CardContent>
         </Card>
         <Card>

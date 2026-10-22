@@ -302,9 +302,18 @@ export function Catalog() {
     void api<Picture>("/api/directory/picture?company_id=" + companyId)
       .then((data) => { if (alive) setPicture(data) })
       .catch((reason: unknown) => { if (alive) setError(reason instanceof Error ? reason.message : "Каталог не прочитан") })
-    void api<WindowsView>("/api/directory/windows?company_id=" + companyId)
+    void api<WindowsView>("/api/directory/windows?company_id=" + companyId + "&part=hw")
       .then((data) => { if (alive) setWindows(data) })
-      .catch(() => { if (alive) setWindows({ ok: false, message: "Срез WinRM не получен" }) })
+      .catch(() => { if (alive) setWindows({ ok: false, message: "Железо контроллеров не получено" }) })
+    void api<WindowsView>("/api/directory/windows?company_id=" + companyId)
+      .then((data) => {
+        if (!alive) return
+        setWindows((current) => {
+          const fresh = (data.controllers || []).some((row) => row.cpu || row.ram_gb)
+          return { ...data, controllers: fresh ? data.controllers : (current?.controllers || data.controllers) }
+        })
+      })
+      .catch(() => { if (alive) setWindows((current) => current || { ok: false, message: "Срез WinRM не получен" }) })
     return () => { alive = false }
   }, [companyId])
 
@@ -697,9 +706,9 @@ export function Catalog() {
                         <button key={row.name} type="button" className="hover:bg-muted/40 rounded-xl border p-3 text-left" onClick={() => setPick({ title: row.name, lines: [row.host || "имя узла не прочитано", row.os || "ОС не прочитана", extra?.maker ? extra.maker + " " + (extra.model || "") : "Модель ещё читается", extra?.bios ? "BIOS " + extra.bios : "BIOS ещё читается", extra?.cpu || "Процессор не прочитан", ...(extra?.volumes || []).map((item) => item.drive + " " + item.size_gb + " ГБ, свободно " + item.free_pct + "%"), ...(extra?.nics || []).map((item) => item.name + (item.address ? " · " + item.address : "")), "Текст событий не читается"] })}>
                           <div className="font-medium">{row.name}</div>
                           <div className="text-muted-foreground mt-1 text-xs">{row.os || "ОС не прочитана"}{extra?.bios ? " · BIOS " + extra.bios : ""}</div>
-                          <div className="mt-2 text-xs">{extra?.cpu || "Процессор ещё читается"}</div>
+                          <div className="mt-2 text-xs">{extra?.cpu || (extra ? "Процессор не прочитан" : windows ? "Контроллер не ответил по WinRM" : "Процессор ещё читается")}</div>
                           <div className="mt-3 grid gap-2">
-                            {extra?.ram_gb ? <Meter label={"Память занята, всего " + extra.ram_gb + " ГБ"} used={Number.isFinite(ramFree) ? 100 - ramFree : 0} /> : <p className="text-muted-foreground text-xs">Память ещё читается.</p>}
+                            {extra?.ram_gb ? <Meter label={"Память занята, всего " + extra.ram_gb + " ГБ"} used={Number.isFinite(ramFree) ? 100 - ramFree : 0} /> : <p className="text-muted-foreground text-xs">{windows ? "Память не прочитана" : "Память ещё читается."}</p>}
                             {(extra?.volumes || []).length ? extra?.volumes?.map((item) => <Meter key={item.drive} label={item.drive + " занят, " + item.size_gb + " ГБ"} used={100 - Number(item.free_pct || 0)} />) : extra?.disk_free_pct ? <Meter label="Диск занят" used={Number.isFinite(diskFree) ? 100 - diskFree : 0} /> : <p className="text-muted-foreground text-xs">Тома ещё читаются.</p>}
                           </div>
                           {(extra?.nics || []).length ? <div className="text-muted-foreground mt-2 text-xs">{extra?.nics?.map((item) => item.name + (item.address ? " · " + item.address : "")).join("; ")}</div> : null}
