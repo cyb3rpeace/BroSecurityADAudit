@@ -1,5 +1,33 @@
 export const RELEASES = [
   {
+    version: "2.6.8",
+    ru: [
+      "Харденинг смотрит аудит изменений каталога и опасные права на корне домена, AdminSDHolder и подразделении контроллеров.",
+      "Протоколы отмечают выключенное шифрование SMB и клиент без обязательной подписи.",
+      "Настрой LDAP/LDAPS, установи BloodHound и приступай к сканированию!",
+    ],
+    en: [
+      "Hardening checks directory-change auditing and dangerous rights on the domain root, AdminSDHolder, and the domain controllers OU.",
+      "Protocol checks flag SMB encryption that is off and an SMB client that does not require signing.",
+      "Set LDAP or LDAPS, install BloodHound, and start the scan.",
+    ],
+  },
+  {
+    version: "2.6.7",
+    ru: [
+      "В шапке у имени стоит знак профиля. Настройки открыты сразу, в две колонки. Сборщик, Chat ID компании и дополнительные узлы убраны.",
+      "Ловушки разобраны по шагам: что создаётся, кто запускает скрипт и какие события смотреть. Пароль на экран не выводится.",
+      "Каталог начинается с обзора тех же областей, что в отчётах оценки каталога.",
+      "Настрой LDAP/LDAPS, установи BloodHound и приступай к сканированию!",
+    ],
+    en: [
+      "The header name has a profile mark. Settings stay open in two columns. The collector script, company chat id, and extra hosts are gone.",
+      "Honeytokens explain what is created, who runs the script, and which events to watch. The password is not shown.",
+      "The catalog opens with the same areas as a directory assessment report.",
+      "Set LDAP or LDAPS, install BloodHound, and start the scan.",
+    ],
+  },
+  {
     version: "2.6.6",
     ru: [
       "У групп в каталоге видно дерево участников. У зон DNS — полоса состава по типам записей. Имена отдельных записей не копируются.",

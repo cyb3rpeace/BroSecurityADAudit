@@ -60,6 +60,43 @@ foreach ($group in @('Domain Admins','Enterprise Admins','Schema Admins')) {
     }
   }
 }
+$audit = auditpol /get /subcategory:"{0cce923c-69ae-11d9-bed3-505054503030}" 2>&1 | Out-String
+if ($audit -notmatch 'Success') {
+  Emit 'audit_ds_changes_off' 'medium' 'Аудит изменений службы каталогов выключен' 'Без успеха по Directory Service Changes события изменения объектов не пишутся. Текст событий платформа не читает.'
+}
+$domainDn = (Get-ADDomain).DistinguishedName
+$paths = @(
+  "AD:$domainDn",
+  "AD:\CN=AdminSDHolder,CN=System,$domainDn",
+  "AD:\OU=Domain Controllers,$domainDn"
+)
+$dcsync = '1131f6aa-9c07-11d1-f79f-00c04fc2dcd2'
+$allowed = 'SYSTEM|Domain Admins|Enterprise Admins|Administrators|Domain Controllers'
+$seenAcl = 0
+foreach ($path in $paths) {
+  if ($seenAcl -ge 12) { break }
+  $acl = Get-Acl -Path $path -ErrorAction SilentlyContinue
+  if (-not $acl) { continue }
+  foreach ($ace in $acl.Access) {
+    if ($seenAcl -ge 12) { break }
+    $who = [string]$ace.IdentityReference
+    $rights = [string]$ace.ActiveDirectoryRights
+    $ext = [string]$ace.ObjectType
+    $why = ''
+    if ($who -match 'Everyone|Anonymous|ANONYMOUS LOGON' -and $rights -match 'GenericAll|WriteDacl|WriteOwner|Delete') {
+      $why = 'широкие права у Everyone или Anonymous'
+    } elseif ($who -match 'Authenticated Users' -and $rights -match 'GenericAll|WriteDacl') {
+      $why = 'избыточные права у Authenticated Users'
+    } elseif ($ext -eq $dcsync -and $who -notmatch $allowed) {
+      $why = 'право репликации каталога вне штатных групп'
+    }
+    if ($why) {
+      $seenAcl++
+      $short = ($path -replace '^AD:\\','')
+      Emit 'dangerous_acl' 'high' "Опасное право: $who" "$why. Объект: $short. Право: $rights."
+    }
+  }
+}
 $schema = (Get-ADRootDSE).schemaNamingContext
 $laps = @(Get-ADObject -SearchBase $schema -LDAPFilter '(|(cn=ms-Mcs-AdmPwd)(cn=ms-LAPS-Password))' -ErrorAction SilentlyContinue)
 if ($laps.Count -eq 0) {

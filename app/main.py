@@ -8,7 +8,6 @@ import json
 import logging
 import os
 import re
-import secrets
 import threading
 import time
 from datetime import datetime
@@ -76,7 +75,7 @@ try:
 except Exception:
     TZ = ZoneInfo("UTC")
 
-PRODUCT_VERSION = "2.6.6"
+PRODUCT_VERSION = "2.6.8"
 
 ALLOWED_MODULES = (
     "bloodhound",
@@ -1005,7 +1004,7 @@ def execute_scan(scan_id: int) -> None:
                         result = run_bloodhound(windows_connection(win_connection))
                     else:
                         result = run_bloodhound(None)
-                        note = "SharpHound удаленно не запускался. Запустите сборщик на Windows Server или на компьютере офицера: архив уйдет на этот сервер. Граф читается, если сбор уже загружали."
+                        note = "SharpHound удаленно не запускался. Запустите его вручную на компьютере, где уже выполнен вход в домен, и загрузите zip на странице SharpHound. Граф читается, если сбор уже загружали."
                         result["message"] = (note + " " + (result.get("message") or "")).strip()
                 elif module == "protocols":
                     findings: list[dict[str, Any]] = []
@@ -2617,64 +2616,6 @@ async def import_sharphound(
     publish_notice(db, company.id, "Загружен архив SharpHound", f"{company.name}. Загрузил: {user.full_name or user.username}. {note[:240]}", "import")
     db.commit()
     return {"ok": bool(result.get("ok")), "message": note[:800], "findings": len(findings)}
-
-
-def _company_by_collector(db: Session, token: str) -> Company | None:
-    digest = hashlib.sha256((token or "").encode("utf-8")).hexdigest()
-    if not token:
-        return None
-    return db.query(Company).filter(Company.collector_hash == digest).first()
-
-
-def collector_script(company: Company, token: str, origin: str) -> str:
-    dc = (company.dc_host or "dc.domain.local").replace("'", "")
-    origin = origin.rstrip("/")
-    return f"""# BroSec Audit AD — сборщик для Windows Server 2019 или Windows 11.
-# Запускайте в консоли, где уже выполнен вход учетной записью с правом чтения домена.
-# Контроллер каталога для ручной сверки: {dc}
-# Пароль в скрипт не подставляется. SharpHound лежит на ЭТОМ компьютере, не обязательно на контроллере.
-$ErrorActionPreference = 'Stop'
-$Audit = '{origin}'
-$Token = '{token}'
-$SharpHound = 'C:\\Tools\\SharpHound\\SharpHound.exe'
-if (-not (Test-Path -LiteralPath $SharpHound)) {{ $SharpHound = 'C:\\Program Files\\SharpHound\\SharpHound.exe' }}
-if (-not (Test-Path -LiteralPath $SharpHound)) {{ throw 'SharpHound.exe не найден. Скачайте выпуск SpecterOps SharpHound и распакуйте в C:\\Tools\\SharpHound' }}
-$work = Join-Path $env:TEMP 'brosec-collector'
-New-Item -ItemType Directory -Force -Path $work | Out-Null
-Get-ChildItem -LiteralPath $work -Filter *.zip -ErrorAction SilentlyContinue | Remove-Item -Force
-& $SharpHound -c DCOnly,Session,LocalAdmin,CA --outputdirectory $work --zipfilename brosec --nosavecache --memcache
-$zip = Get-ChildItem -LiteralPath $work -Filter *.zip | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-if (-not $zip) {{ throw 'SharpHound не создал архив' }}
-curl.exe -sS -f -H "X-Collector-Token: $Token" -F "upload=@$($zip.FullName)" "$Audit/api/ingest/sharphound"
-Write-Output 'Сбор отправлен на сервер аудита. Обновите веб-интерфейс.'
-"""
-
-
-@app.get("/api/collector/script")
-def collector_download(company_id: int, request: Request, user: User = Depends(get_user), db: Session = Depends(get_db)) -> dict[str, str]:
-    company = resolve_company(user, db, company_id)
-    token = secrets.token_urlsafe(32)
-    company.collector_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
-    write_audit(db, user, "collector_script", "Собран скрипт сборщика. Пароль домена в него не входит.", company.id)
-    db.commit()
-    origin = str(request.base_url).rstrip("/")
-    if origin.startswith("http://"):
-        origin = "https://" + origin[len("http://"):]
-    return {"script": collector_script(company, token, origin)}
-
-
-@app.post("/api/ingest/sharphound")
-async def ingest_sharphound(request: Request, upload: UploadFile = File(...), db: Session = Depends(get_db)) -> dict[str, str]:
-    company = _company_by_collector(db, request.headers.get("x-collector-token", ""))
-    if company is None:
-        raise HTTPException(status_code=401, detail="Сборщик не опознан. Соберите скрипт заново в настройках.")
-    del company
-    blob = await upload.read()
-    try:
-        message = ingest_sharphound_zip(blob)
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"BloodHound CE не принял архив: {exc}") from exc
-    return {"ok": "true", "message": message}
 
 
 @app.delete("/api/demo-profile")

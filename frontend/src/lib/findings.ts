@@ -52,6 +52,9 @@ export const DEVICE_IDS = new Set([
   "empty_ou",
   "dns_wildcard",
   "webclient_running",
+  "smb_encryption_off",
+  "smb_client_signing_off",
+  "audit_ds_changes_off",
 ])
 export const PATH_IDS = new Set([
   "kerberoasting",
@@ -62,6 +65,7 @@ export const PATH_IDS = new Set([
   "rbcd",
   "shadow_credential",
   "machine_quota",
+  "dangerous_acl",
 ])
 
 const SOURCE_NAMES: Record<string, string> = {

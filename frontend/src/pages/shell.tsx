@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { Bell, BookOpen, Bot, FileText, LayoutDashboard, Menu, Monitor, Network, Palette, Radar, Settings, Siren, Sparkles, Users, Waypoints, Archive } from "lucide-react"
+import { Bell, BookOpen, Bot, FileText, LayoutDashboard, Menu, Monitor, Network, Palette, Radar, Settings, Siren, Sparkles, Users, UserRound, Waypoints, Archive } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -169,8 +169,11 @@ export function Shell() {
               </SelectContent>
             </Select>
             <div className="relative" ref={userBox}>
-              <Button variant="outline" className="max-w-40 truncate" onClick={() => setUserMenu((value) => !value)}>
-                {app.me?.full_name || app.me?.username || "Профиль"}
+              <Button variant="outline" className="max-w-56 gap-2" onClick={() => setUserMenu((value) => !value)}>
+                <span className="grid size-6 shrink-0 place-items-center rounded-full bg-gradient-to-br from-fuchsia-500 to-cyan-400 text-white shadow-[0_0_12px_rgba(217,70,239,0.45)]">
+                  <UserRound className="size-3.5" />
+                </span>
+                <span className="truncate">{app.me?.full_name || app.me?.username || "Профиль"}</span>
               </Button>
               {userMenu ? (
                 <div className="bg-popover absolute right-0 z-50 mt-1 w-56 rounded-xl border p-1 shadow">

@@ -32,14 +32,14 @@ const DOCS = {
     ["ldap", "Каталог: LDAPS 636 и простой LDAP 389", "В настройках укажите DNS-имя контроллера и служебную учетную запись этого же домена. Формат DOMAIN\\user или user@domain. Права администратора домена не нужны, достаточно чтения. LDAPS 636 — если на контроллере есть сертификат. LDAP 389 — обычный канал без шифрования, только внутри доверенной сети. Гигиена, доверия и типы шифрования Kerberos идут этим каналом."],
     ["areas", "Области аудита", "Учетные записи: пароли, блокировка, служебные записи, точечные политики. Устройства: устаревшие ОС, пароль компьютера, покрытие LAPS без чтения пароля, пустые подразделения. Пути: делегирование, SPN, шаблоны сертификатов, только признаки. Группы: пустые, слишком большие и слишком глубоко вложенные, без списка участников. DNS: свойства зоны без содержимого. Контроллеры: процессор, память, диск и счётчики входов за сутки без текста чужих сессий."],
     ["sh", "Как установить SharpHound", "Возьмите SharpHound.exe из выпусков SpecterOps той же ветки, что понимает BloodHound CE. Распакуйте в C:\\Tools\\SharpHound. Сбор: SharpHound.exe -c DCOnly,Session,LocalAdmin,CA --zipfilename brosec --nosavecache. Хеши и билеты не выгружаются. Zip загружается в пункт меню SharpHound."],
-    ["link", "Как связать программу с сервером", "SharpHound запускается вручную на компьютере, где офицер уже вошел в домен, и загружается со своей страницы. Реестр, время, SYSVOL и установленные программы сервер читает по WinRM. Значение cpassword не расшифровывается. Сборщик в настройках не содержит пароль домена."],
+    ["link", "Как связать программу с сервером", "SharpHound запускается вручную на компьютере, где офицер уже вошел в домен, и загружается со своей страницы. Реестр, время, SYSVOL и установленные программы сервер читает по WinRM. Значение cpassword не расшифровывается."],
     ["mail", "Почта, Telegram и ассистент", "Суперадминистратор задает SMTP и бота Telegram. Пароль и токен обратно в браузер не возвращаются. После сканирования уходят письмо и сообщение, если каналы настроены. Модель ассистента подключается адресом в формате OpenAI, путь заканчивается на /v1."],
   ],
   en: [
     ["start", "Start here", "The directory is read from Linux over LDAP or LDAPS. SharpHound runs on any domain-joined Windows host. Set LDAP or LDAPS, install BloodHound, and start the scan."],
     ["ldap", "LDAP 389 and LDAPS 636", "A domain read account is enough. Use DOMAIN\\user or user@domain. Pick LDAPS 636 when the controller has a certificate. Pick plain LDAP 389 only on a trusted network."],
     ["areas", "Audit areas", "Accounts, devices, delegation, groups, and DNS zone names. Group member lists and binary DNS records stay out of the report. Full GPO diffs, live logon events, and hardware inventory are not part of the product."],
-    ["tools", "Install SharpHound", "Unzip SharpHound to C:\\Tools. Run it on a computer where you are already signed in to the domain and upload the zip from the SharpHound page. The collector script does not contain the domain password."],
+    ["tools", "Install SharpHound", "Unzip SharpHound to C:\\Tools. Run it on a computer where you are already signed in to the domain and upload the zip from the SharpHound page."],
   ],
 } as const
 

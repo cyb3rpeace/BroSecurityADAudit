@@ -470,8 +470,8 @@
             <summary>Как скачать и установить SharpHound</summary>
             <ol>
               <li>Откройте выпуски SpecterOps SharpHound: <b>https://github.com/SpecterOps/SharpHound/releases</b>. Скачайте SharpHound.exe той же ветки, что понимает BloodHound CE.</li>
-              <li>Распакуйте в <b>C:\Tools\SharpHound</b>. Это сборщик графа. Он не выгружает хеши и билеты.</li>
-              <li>BloodHound CE уже работает на сервере аудита во внутренней сети Docker. Наружу его публиковать не нужно. Сборщик только передает zip на сервер аудита, а сервер сам кладет архив в CE.</li>
+              <li>Распакуйте в <b>C:\Tools\SharpHound</b>. Это программа графа. Она не выгружает хеши и билеты.</li>
+              <li>BloodHound CE уже работает на сервере аудита во внутренней сети Docker. Наружу его публиковать не нужно. Zip загружается со страницы SharpHound, сервер сам кладет архив в CE.</li>
               <li>Запускайте SharpHound в сессии доменной учетной записи чтения. Отдельный пароль в скрипт не записывается.</li>
             </ol>
           </details>
@@ -479,14 +479,14 @@
             <summary>Как связать программы с сервером аудита</summary>
             <p>Два рабочих способа. Выберите тот, до которого сервер аудита реально достучится.</p>
             <p><b>Способ А. Сервер сам заходит на Windows.</b> В настройках заполните «Windows-хост» — это Server 2019 или компьютер офицера, не контроллер. Транспорт «WinRM» и порт 5986, открытый только с адреса сервера аудита. Учетная запись та же, что для каталога, плюс право удаленного PowerShell на этом хосте. Галочки PingCastle и BloodHound запустят уже установленные exe. Для реестра SMB, LLMNR и подписи LDAP WinRM нужен еще и на контроллере: эти параметры живут там.</p>
-            <p><b>Способ Б. Сборщик на самом Windows.</b> Если до компьютера офицера сервер не достучится, в настройках оставьте «только сборщик» и нажмите «Собрать скрипт сборщика». Скопируйте его на Windows, поправьте пути, если exe лежат не в C:\Tools, и запустите. Скрипт вызовет PingCastle и SharpHound и отправит XML и zip на этот сайт. Токен внутри скрипта одноразовый для компании, пароля домена в нем нет.</p>
+            <p><b>Способ Б. Вручную.</b> Если до компьютера офицера сервер не достучится, SharpHound запускают в уже открытой доменной сессии и загружают zip на странице SharpHound. Пароль домена в команду не подставляется.</p>
           </details>
           <details class="acc">
             <summary>Какая галочка что запускает</summary>
             <ul>
               <li><b>Гигиена, доверия, часть харденинга</b> — LDAP или LDAPS с Linux.</li>
               <li><b>Опасные протоколы</b> — по LDAP типы шифрования DES и RC4; по WinRM на контроллере SMBv1, подпись SMB, LLMNR, NetBIOS, WPAD, WDigest, NTLMv1, подпись и привязка канала LDAP, анонимный сеанс, PowerShell 2.0, TLS 1.0.</li>
-              <li><b>PingCastle и SharpHound</b> — Windows-хост из поля выше или сборщик.</li>
+              <li><b>SharpHound</b> — вручную на Windows, zip загружается на своей странице.</li>
               <li><b>Время, GPO, AD CS, полный харденинг</b> — WinRM на контроллер. Значение cpassword не расшифровывается, билеты не запрашиваются.</li>
             </ul>
           </details>
@@ -524,7 +524,7 @@
           </details>
           <details class="acc">
             <summary>Install and connect the tools</summary>
-            <p>Download PingCastle from the Netwrix GitHub releases and SharpHound from the SpecterOps GitHub releases. Unzip them to C:\Tools\PingCastle and C:\Tools\SharpHound. Either point WinRM at that Windows host, or build the collector script in Settings and run it there. The script uploads the XML and the zip. It does not contain the domain password.</p>
+            <p>Download SharpHound from the SpecterOps GitHub releases and unzip it to C:\Tools\SharpHound. Run it in an existing domain session and upload the zip on the SharpHound page. The domain password is not placed in the command.</p>
           </details>
           <details class="acc">
             <summary>Reports and MITRE</summary>
@@ -583,7 +583,7 @@
 
       <section id="view-sharphound" class="hidden">
         <h1>SharpHound</h1>
-        <p class="sub">Сборщик запускается в том же доменном входе. В платформу попадает zip. Хеши и билеты не запрашиваются.</p>
+        <p class="sub">SharpHound запускают вручную в том же доменном входе и загружают zip здесь. Хеши и билеты не запрашиваются.</p>
         <div class="grid-2">
           <article class="card">
             <h2>Как собрать граф</h2>
@@ -609,13 +609,13 @@
         <p class="sub" data-i18n="set.sub">Подключение к каталогу, тенанты и администраторы.</p>
         <div class="flow" id="flow-ru">
           <article><b>1. Каталог</b><p>Служебная учетная запись домена. Linux открывает LDAPS и сам читает пользователей, группы, доверия и схему. Скрипт на Windows для этого не нужен.</p></article>
-          <article><b>2. Программы</b><p>PingCastle.exe и SharpHound.exe ставятся на любой Windows: Server 2019 или компьютер офицера. Контроллер для этого не нужен. Либо WinRM на этот хост, либо сборщик, который сам отправит результат.</p></article>
-          <article><b>3. Оба канала</b><p>Одна учетная запись чтения. Каталог идет по LDAP или LDAPS. PingCastle и SharpHound — с отдельного Windows-хоста или сборщиком. Реестр, время и SYSVOL — по WinRM на контроллер.</p></article>
+          <article><b>2. Программы</b><p>SharpHound.exe ставится на любой Windows: Server 2019 или компьютер офицера. Контроллер для этого не нужен. Архив загружается вручную на странице SharpHound.</p></article>
+          <article><b>3. Оба канала</b><p>Одна учетная запись чтения. Каталог идет по LDAP или LDAPS. SharpHound запускают вручную. Реестр, время и SYSVOL — по WinRM на контроллер.</p></article>
         </div>
         <div class="flow hidden" id="flow-en">
           <article><b>1. Directory</b><p>A domain service account. Linux opens LDAPS and reads users, groups, trusts, and schema. No Windows script is required for that.</p></article>
-          <article><b>2. Programs</b><p>Install PingCastle.exe and SharpHound.exe on any Windows host: Server 2019 or the officer workstation. The domain controller is not required. Use WinRM to that host, or the collector script.</p></article>
-          <article><b>3. Both channels</b><p>One read account. The directory uses LDAP or LDAPS. PingCastle and SharpHound run on a separate Windows host or via the collector. Registry, time, and SYSVOL use WinRM to the controller.</p></article>
+          <article><b>2. Programs</b><p>Install SharpHound.exe on any Windows host: Server 2019 or the officer workstation. The domain controller is not required. Upload the zip by hand on the SharpHound page.</p></article>
+          <article><b>3. Both channels</b><p>One read account. The directory uses LDAP or LDAPS. SharpHound is started by hand. Registry, time, and SYSVOL use WinRM to the controller.</p></article>
         </div>
         <div class="split" id="notify-box">
           <form id="mail-form" class="card">
@@ -668,7 +668,7 @@
         <div class="split">
           <form id="company-form" class="card">
             <h2 data-i18n="set.conn">Подключение к Active Directory</h2>
-            <p class="muted" data-i18n="set.conn.help">LDAP 389 или LDAPS 636 читает каталог с Linux. PingCastle и SharpHound запускаются на любом Windows-хосте или сборщиком. Реестр читается по WinRM с контроллера.</p>
+            <p class="muted" data-i18n="set.conn.help">LDAP 389 или LDAPS 636 читает каталог с Linux. SharpHound загружается вручную. Реестр читается по WinRM с контроллера.</p>
             <input id="c-name" data-i18n-ph="set.name" placeholder="Название компании" style="margin-top:8px"/>
             <input id="c-domain" data-i18n-ph="set.domain" placeholder="Домен DNS" style="margin-top:8px"/>
             <input id="dc-host" data-i18n-ph="set.dc" placeholder="Контроллер домена" style="margin-top:8px"/>
@@ -681,7 +681,7 @@
             </select>
             <input id="c-runner" placeholder="Windows-хост для PingCastle и SharpHound, не обязательно контроллер" style="margin-top:8px"/>
             <select id="c-transport" style="margin-top:8px">
-              <option value="none">Программы: только сборщик, без WinRM</option>
+              <option value="none">Программы: без удалённого запуска</option>
               <option value="winrm">Программы: WinRM на Windows-хост</option>
               <option value="ssh">Программы: SSH на Windows-хост</option>
             </select>
@@ -690,9 +690,9 @@
               <input id="c-winrm" type="number" placeholder="WinRM 5986"/>
             </div>
             <input id="c-ssh" type="number" placeholder="SSH" style="margin-top:8px"/>
-            <textarea id="c-hosts" rows="3" data-i18n-ph="set.hosts" placeholder="Дополнительные узлы для аудита ПО" style="margin-top:8px"></textarea>
+            <textarea id="c-hosts" rows="3" hidden></textarea>
             <input id="c-mail" data-i18n-ph="set.mail" placeholder="Почта для отчета и алертов этой компании" style="margin-top:8px"/>
-            <input id="c-tg" placeholder="Chat id Telegram этой компании, пусто — общий чат" style="margin-top:8px"/>
+            <input id="c-tg" hidden/>
             <button class="btn" type="submit" style="margin-top:10px" data-i18n="save">Сохранить</button>
           </form>
           <div class="card">
@@ -718,11 +718,7 @@
         </article>
         <article class="card" style="margin-top:14px">
           <h2 data-i18n="set.honey">Ловушки</h2>
-          <p class="muted">Сборщик запускают на Windows Server 2019 или на компьютере офицера. Он сам вызывает PingCastle и SharpHound и отправляет результат сюда. Пароль в скрипт не записывается.</p>
-          <button id="collector-btn" class="btn" type="button">Собрать скрипт сборщика</button>
-          <button id="collector-copy" class="btn ghost" type="button">Копировать</button>
-          <pre id="collector-script"></pre>
-          <p class="muted" data-i18n="set.honey.help">Скрипт создает непривилегированные приманки. Пароль на экран не выводится.</p>
+          <p class="muted">Ловушка — учётная запись и скрытая папка, которыми никто не пользуется. Скрипт запускают один раз на контроллере от имени администратора домена. Пароль на экран не выводится, прав запись не получает. Смотрите события 4769, 4624, 4625, 5140 и 5145.</p>
           <button id="honey-btn" class="btn" type="button" data-i18n="set.honey.build">Собрать скрипт</button>
           <button id="honey-copy" class="btn ghost" type="button" data-i18n="copy">Копировать</button>
           <pre id="honey-script"></pre>
@@ -779,7 +775,7 @@
         "rep.added": "Что появилось", "rep.removed": "Что исчезло", "rep.history": "История срезов", "rep.none": "Два среза еще не готовы.", "rep.new": "Новых правил нет.", "rep.closed": "Закрытых правил нет.",
         "docs.lead": "Архитектура, требования и описание каждого блока.",
         "set.sub": "Подключение к каталогу, тенанты и администраторы.", "set.conn": "Подключение к Active Directory",
-        "set.conn.help": "LDAP 389 или LDAPS 636 читает каталог с Linux. PingCastle и SharpHound запускаются на любом Windows-хосте или сборщиком. Реестр читается по WinRM с контроллера.",
+        "set.conn.help": "LDAP 389 или LDAPS 636 читает каталог с Linux. SharpHound загружается вручную. Реестр читается по WinRM с контроллера.",
         "set.name": "Название компании", "set.domain": "Домен DNS", "set.dc": "Контроллер домена", "set.user": "DOMAIN\\svc-audit или svc-audit@domain",
         "set.pass": "Пароль, пусто — не менять", "set.hosts": "Дополнительные узлы для аудита ПО", "set.mail": "Почта для отчета",
         "set.scan": "Сканирование", "set.tenants": "Тенанты", "set.tenant.add": "Создать компанию", "set.admins": "Администраторы", "set.admin.add": "Создать",
@@ -816,7 +812,7 @@
         "rep.added": "What appeared", "rep.removed": "What disappeared", "rep.history": "Slice history", "rep.none": "Two slices are not ready yet.", "rep.new": "No new rules.", "rep.closed": "No closed rules.",
         "docs.lead": "Architecture, requirements, and every block.",
         "set.sub": "Directory connection, tenants, and administrators.", "set.conn": "Active Directory connection",
-        "set.conn.help": "LDAP 389 or LDAPS 636 reads the directory from Linux. PingCastle and SharpHound run on any Windows host or via the collector. Registry checks use WinRM on the controller.",
+        "set.conn.help": "LDAP 389 or LDAPS 636 reads the directory from Linux. SharpHound is uploaded by hand. Registry checks use WinRM on the controller.",
         "set.name": "Company name", "set.domain": "DNS domain", "set.dc": "Domain controller", "set.user": "DOMAIN\\svc-audit or svc-audit@domain",
         "set.pass": "Password, blank keeps the saved one", "set.hosts": "Extra hosts for the software audit", "set.mail": "Report mailbox",
         "set.scan": "Scan", "set.tenants": "Tenants", "set.tenant.add": "Create company", "set.admins": "Administrators", "set.admin.add": "Create",
@@ -1414,11 +1410,6 @@
         document.getElementById("run-log").textContent = t("admin.ok");
       } catch (error) { document.getElementById("run-log").textContent = error.message; }
     });
-    document.getElementById("collector-btn").addEventListener("click", async () => {
-      try { const data = await api("/api/collector/script?company_id=" + companyId()); document.getElementById("collector-script").textContent = data.script; }
-      catch (error) { document.getElementById("collector-script").textContent = error.message; }
-    });
-    document.getElementById("collector-copy").addEventListener("click", () => navigator.clipboard.writeText(document.getElementById("collector-script").textContent));
     document.getElementById("docs-open").addEventListener("click", () => document.querySelectorAll("#docs-ru details, #docs-en details").forEach((node) => { node.open = true; }));
     document.getElementById("docs-close").addEventListener("click", () => document.querySelectorAll("#docs-ru details, #docs-en details").forEach((node) => { node.open = false; }));
     document.getElementById("honey-btn").addEventListener("click", async () => {

@@ -2,7 +2,7 @@
 
 Консоль аудита Active Directory для отдела безопасности. Linux-сервер читает каталог по LDAP или LDAPS, снимает позу контроллера по WinRM и складывает находки в одну картотеку. Рядом со справочником лежит база знаний: что означает проверка, чем она кончается и готовый текст письма администраторам. Почта и Telegram включаются по событиям, а не одним общим тумблером.
 
-Интерфейс на русском и английском, три темы. Отчёты и справочник остаются на русском. Текущая версия в коде: **2.6.6**. История: [CHANGELOG.md](CHANGELOG.md).
+Интерфейс на русском и английском, три темы. Отчёты и справочник остаются на русском. Текущая версия в коде: **2.6.8**. История: [CHANGELOG.md](CHANGELOG.md).
 
 ## Требования к виртуальной машине
 
@@ -16,15 +16,11 @@
 
 Порт **9443** должен быть свободен. Порты 443 и 8443 эта сборка не занимает. Образы PostgreSQL, Neo4j и BloodHound CE скачиваются командой ниже сами, отдельно их ставить не нужно.
 
-![Страница входа](docs/login.png)
-
 ![Обзор](docs/overview.png)
 
 ![Каталог](docs/catalog.png)
 
-![Справочник](docs/reference.png)
-
-На снимках обзора и каталога названия компании, домена и узлов закрыты.
+На снимках названия компании, домена и узлов закрыты.
 
 ## 🚀 Поднять у себя одной командой
 
@@ -53,7 +49,49 @@ openssl rand -hex 32
 | WinRM 5985 на контроллере | Реестр, время, SYSVOL и аудит программ |
 | Windows, где офицер уже в домене | Ручной SharpHound, затем загрузка zip |
 
-SharpHound **не** ставится на контроллер и **не** запускается с отдельного хоста из настроек. Архив загружается со страницы SharpHound.
+SharpHound **не** ставится на контроллер и **не** запускается с сервера. Архив загружается со страницы SharpHound.
+
+## Ручная установка
+
+Команда `docker compose up` скачивает PostgreSQL, Neo4j и BloodHound CE. Сам Docker, SharpHound и WinRM на контроллере она не ставит.
+
+Docker и Compose на Ubuntu 22.04 или 24.04:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y ca-certificates curl
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+sudo apt-get update
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+sudo usermod -aG docker "$USER"
+```
+
+После `usermod` выйдите из сессии и зайдите снова, затем выполняйте `docker compose`.
+
+SharpHound на компьютере, где уже выполнен вход в домен:
+
+```powershell
+New-Item -ItemType Directory -Force -Path C:\Tools\SharpHound | Out-Null
+$release = Invoke-RestMethod https://api.github.com/repos/SpecterOps/SharpHound/releases/latest
+$asset = $release.assets | Where-Object { $_.name -like '*.zip' } | Select-Object -First 1
+Invoke-WebRequest $asset.browser_download_url -OutFile "$env:TEMP\SharpHound.zip"
+Expand-Archive "$env:TEMP\SharpHound.zip" -DestinationPath C:\Tools\SharpHound -Force
+```
+
+Запустите `SharpHound.exe` методами DCOnly, Session, LocalAdmin и CA и загрузите zip на странице SharpHound. Пароль домена в команду не подставляется.
+
+WinRM на контроллере, от имени администратора:
+
+```powershell
+Enable-PSRemoting -Force
+Set-Item WSMan:\localhost\Service\AllowUnencrypted -Value $false
+Enable-NetFirewallRule -Name WINRM-HTTP-In-TCP
+```
+
+Модуль Active Directory на контроллере уже есть. Отдельно его ставить не нужно.
 
 ## 🧩 Архитектура
 
@@ -112,8 +150,8 @@ SharpHound **не** ставится на контроллер и **не** за�
 | Гигиена каталога | LDAP | Устаревшие ОС, неактивные учетные записи, привилегии без отдельного имени, короткая политика паролей, отсутствие блокировки, делегирование, RBCD, AS-REP, обратимое шифрование, DES, SPN пользователей, SID history, устаревшие компьютеры, уровень домена, квота машинных учетных записей |
 | Доверия и SID | LDAP | Доверия и выключенная фильтрация SID |
 | Время | WinRM, `w32tm` | Расхождение часов контроллеров |
-| Протоколы | LDAP и реестр контроллера | DES/RC4, SMB, LLMNR, NetBIOS, NTLM, подпись LDAP, channel binding, анонимная сессия, PowerShell 2.0, WPAD |
-| Харденинг | WinRM и LDAP | Диспетчер печати, подпись LDAP, возраст пароля krbtgt, «пароль не истекает» у служебных учетных записей, LAPS в схеме |
+| Протоколы | LDAP и реестр контроллера | DES/RC4, SMB и его шифрование, подпись клиента SMB, LLMNR, NetBIOS, NTLM, подпись LDAP, channel binding, анонимная сессия, PowerShell 2.0, WPAD |
+| Харденинг | WinRM и LDAP | Диспетчер печати, подпись LDAP, возраст пароля krbtgt, «пароль не истекает» у привилегированных учетных записей, LAPS в схеме, аудит изменений каталога, опасные права на корне домена, AdminSDHolder и подразделении контроллеров |
 | Пароли в GPO | SYSVOL по WinRM | Сам факт атрибута `cpassword`. Значение не читается и не расшифровывается |
 | AD CS | LDAP, раздел конфигурации | Шаблон, где заявитель задает имя, есть проверка подлинности клиента и нет согласования выпуска |
 | Аудит программ | LDAP-список компьютеров и WinRM | Windows 10 и программы удаленного доступа из черного списка |

@@ -120,7 +120,7 @@ const RU: Record<string, string> = {
   "bell.open": "Перейти в уведомления",
   "bell.delete": "Удалить",
   "welcome.close": "Закрыть",
-  "sh.sub": "Сборщик запускается в том же доменном входе. В платформу попадает zip. Хеши и билеты не запрашиваются.",
+  "sh.sub": "SharpHound запускают вручную на компьютере, где уже выполнен вход в домен, и загружают zip на этой странице. Хеши и билеты не запрашиваются.",
   "empty.company": "Компания ещё не создана",
 }
 
@@ -244,7 +244,7 @@ const EN: Record<string, string> = {
   "bell.open": "Open notifications",
   "bell.delete": "Delete",
   "welcome.close": "Close",
-  "sh.sub": "Run the collector in the same domain logon. The platform receives the zip. Hashes and tickets are not requested.",
+  "sh.sub": "Run SharpHound by hand on a computer already signed in to the domain, then upload the zip on this page. Hashes and tickets are not requested.",
   "empty.company": "No company yet",
 }
 

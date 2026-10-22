@@ -59,6 +59,7 @@ type Pick = { title: string; lines: string[] }
 
 const POSTURE = ["ldap_signing_not_required", "smb_signing_off", "ldap_channel_binding", "ntlmv1_allowed", "llmnr_enabled", "print_spooler_on_dc", "webclient_running", "time_skew"]
 const SECTIONS = [
+  ["suite", "Обзор"],
   ["topology", "Топология"],
   ["accounts", "Учётные записи"],
   ["groups", "Группы и OU"],
@@ -236,7 +237,7 @@ export function Catalog() {
   const [picture, setPicture] = useState<Picture | null>(null)
   const [windows, setWindows] = useState<WindowsView | null>(null)
   const [error, setError] = useState("")
-  const [tab, setTab] = useState<(typeof SECTIONS)[number][0]>("topology")
+  const [tab, setTab] = useState<(typeof SECTIONS)[number][0]>("suite")
   const [query, setQuery] = useState("")
   const [sidOff, setSidOff] = useState(false)
   const [conflictsOnly, setConflictsOnly] = useState(false)
@@ -280,7 +281,7 @@ export function Catalog() {
 
   return (
     <div>
-      <PageHead title="Каталог" sub="Схема домена, учётные записи, группы, DNS, доверия, политики и контроллеры. Перетаскивание не уводит блоки за край." />
+      <PageHead title="Каталог" sub="Те же области, что в отчётах оценки каталога: обзор, топология, учётные записи, группы, DNS, доверия, политики, контроллеры и поза. Имена отдельных DNS-записей не копируются." />
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
       {!picture && !error ? <p className="text-muted-foreground text-sm">Читаем каталог...</p> : null}
       {picture && !picture.ok ? <p className="text-sm">{picture.message}</p> : null}
@@ -297,6 +298,40 @@ export function Catalog() {
                 <Input className="max-w-sm" value={query} placeholder="Поиск по имени, зоне, политике" onChange={(event) => setQuery(event.target.value)} />
                 <Button variant="outline" onClick={() => { setSidOff(false); setConflictsOnly(false); setGroupKind("all"); setQuery("") }}>Сбросить фильтры</Button>
               </div>
+              {tab === "suite" ? (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {[
+                    ["Топология", String((picture.sites || []).length) + " сайтов · " + String((picture.dcs || []).length) + " контроллеров", "topology"],
+                    ["Учётные записи", "Длина пароля " + (picture.policy?.length || "—") + ", блокировка " + (picture.policy?.lockout || "—"), "accounts"],
+                    ["Группы и OU", String(picture.groups?.length || 0) + " групп · " + String(picture.ous?.length || 0) + " подразделений", "groups"],
+                    ["DNS", String(windows?.dns?.zones?.length || picture.zones?.length || 0) + " зон · подстановка " + (windows?.dns?.wildcard ? "есть" : "нет"), "dns"],
+                    ["Доверия", String(picture.trusts?.length || 0) + " связей · без фильтрации SID " + weakTrusts, "trusts"],
+                    ["Политики", String(picture.gpos?.length || 0) + " объектов · расхождений " + String(windows?.conflicts?.length ?? "…"), "gpo"],
+                    ["Контроллеры", String((windows?.controllers || []).filter((row) => row.ok).length) + " ответили из " + String(picture.dcs?.length || 0), "dcs"],
+                    ["Поза", String(posture.length) + " открытых отметок по подписи, времени и службам", "posture"],
+                  ].map(([title, value, id]) => (
+                    <button key={id} type="button" className="hover:bg-muted/40 rounded-xl border p-4 text-left" onClick={() => setTab(id as (typeof SECTIONS)[number][0])}>
+                      <div className="text-sm font-medium">{title}</div>
+                      <div className="text-muted-foreground mt-1 text-sm">{value}</div>
+                    </button>
+                  ))}
+                  <div className="rounded-xl border p-4 sm:col-span-2">
+                    <div className="mb-2 text-sm font-medium">Состав групп</div>
+                    {(() => {
+                      const security = (picture.groups || []).filter((row) => row.security).length
+                      const mail = (picture.groups || []).length - security
+                      const total = security + mail || 1
+                      return (
+                        <div className="flex h-3 overflow-hidden rounded-full">
+                          <div className="h-full bg-fuchsia-500" style={{ width: (security / total * 100) + "%" }} title={"Безопасность " + security} />
+                          <div className="h-full bg-cyan-400" style={{ width: (mail / total * 100) + "%" }} title={"Рассылка " + mail} />
+                        </div>
+                      )
+                    })()}
+                    <p className="text-muted-foreground mt-2 text-xs">Розовая доля — группы безопасности, голубая — рассылки. Участники открываются на вкладке «Группы и OU».</p>
+                  </div>
+                </div>
+              ) : null}
               {tab === "topology" ? (
                 <div className="grid gap-3">
                   <Topology domain={picture.domain || ""} sites={picture.sites || []} subnets={picture.subnets || []} roles={picture.roles || []} links={windows?.replication || []} onPick={setPick} />

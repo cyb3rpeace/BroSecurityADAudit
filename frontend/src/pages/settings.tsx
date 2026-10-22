@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react"
 import { toast } from "sonner"
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -9,7 +8,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Textarea } from "@/components/ui/textarea"
 import { PageHead } from "@/components/bits"
 import { api } from "@/lib/api"
 import type { AuditRow, Company, ConsoleUser } from "@/lib/types"
@@ -95,63 +93,46 @@ export function Settings() {
           <TabsTrigger value="audit">Аудит</TabsTrigger>
         </TabsList>
         <TabsContent value="params" className="pt-3">
-          <Accordion type="multiple" defaultValue={["conn"]} className="gap-2">
-            <AccordionItem value="conn" className="rounded-xl border px-4">
-              <AccordionTrigger>{t("set.conn")}</AccordionTrigger>
-              <AccordionContent className="grid gap-3">
-                <p className="text-muted-foreground text-sm">{t("set.conn.help")}</p>
-                <div className="grid gap-3 lg:grid-cols-2">
-                  <Card>
-                    <CardHeader><CardTitle className="text-base">Компания</CardTitle></CardHeader>
-                    <CardContent className="grid gap-2">
-                      <Input value={form.name} disabled={!me?.is_superadmin} placeholder="Название компании" onChange={(event) => set("name", event.target.value)} />
-                      <Input value={form.domain} placeholder="Домен DNS" onChange={(event) => set("domain", event.target.value)} />
-                      <Input value={form.notify_email} placeholder="Почта для отчета этой компании" onChange={(event) => set("notify_email", event.target.value)} />
-                      <Input value={form.telegram_chat} placeholder="Chat id Telegram этой компании" onChange={(event) => set("telegram_chat", event.target.value)} />
-                    </CardContent>
-                  </Card>
-                  <Card>
-                    <CardHeader><CardTitle className="text-base">Каталог</CardTitle></CardHeader>
-                    <CardContent className="grid gap-2">
-                      <Input value={form.dc_host} placeholder="Контроллер домена" onChange={(event) => set("dc_host", event.target.value)} />
-                      <Input value={form.dc_user} placeholder="DOMAIN\svc-audit или svc-audit@domain" onChange={(event) => set("dc_user", event.target.value)} />
-                      <Input type="password" value={form.dc_password} placeholder="Пароль, пусто — не менять" autoComplete="new-password" onChange={(event) => set("dc_password", event.target.value)} />
-                      <p className="text-muted-foreground text-xs">{company?.dc_password_set ? t("pass.set") : t("pass.miss")}</p>
-                    </CardContent>
-                  </Card>
-                </div>
+          <div className="grid items-start gap-3 lg:grid-cols-2">
+            <Card>
+              <CardHeader className="pb-2"><CardTitle className="text-base">Компания</CardTitle></CardHeader>
+              <CardContent className="grid gap-2">
+                <Input value={form.name} disabled={!me?.is_superadmin} placeholder="Название компании" onChange={(event) => set("name", event.target.value)} />
+                <Input value={form.domain} placeholder="Домен DNS" onChange={(event) => set("domain", event.target.value)} />
+                <Input value={form.notify_email} placeholder="Почта для отчета этой компании" onChange={(event) => set("notify_email", event.target.value)} />
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2"><CardTitle className="text-base">{t("set.conn")}</CardTitle></CardHeader>
+              <CardContent className="grid gap-2">
+                <p className="text-muted-foreground text-xs">{t("set.conn.help")}</p>
+                <Input value={form.dc_host} placeholder="Контроллер домена" onChange={(event) => set("dc_host", event.target.value)} />
+                <Input value={form.dc_user} placeholder="DOMAIN\\svc-audit или svc-audit@domain" onChange={(event) => set("dc_user", event.target.value)} />
+                <Input type="password" value={form.dc_password} placeholder="Пароль, пусто — не менять" autoComplete="new-password" onChange={(event) => set("dc_password", event.target.value)} />
+                <p className="text-muted-foreground text-xs">{company?.dc_password_set ? t("pass.set") : t("pass.miss")}</p>
                 <Select value={form.directory_mode} onValueChange={(value) => { set("directory_mode", value); set("ldap_port", value === "ldap" ? "389" : "636") }}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="ldaps">Каталог: LDAPS, порт 636</SelectItem>
                     <SelectItem value="ldap">Каталог: LDAP, порт 389</SelectItem>
                   </SelectContent>
-            </Select>
-                <Textarea rows={3} value={form.scan_hosts} placeholder="Дополнительные узлы для аудита ПО" onChange={(event) => set("scan_hosts", event.target.value)} />
+                </Select>
                 <Button onClick={() => void saveCompany()}>{t("save")}</Button>
-              </AccordionContent>
-            </AccordionItem>
-            {me?.is_superadmin ? (
-              <AccordionItem value="channels" className="rounded-xl border px-4">
-                <AccordionTrigger>Почта, Telegram и модель</AccordionTrigger>
-                <AccordionContent><Channels /></AccordionContent>
-              </AccordionItem>
-            ) : null}
-            <AccordionItem value="people" className="rounded-xl border px-4">
-              <AccordionTrigger>Тенанты и пользователи</AccordionTrigger>
-              <AccordionContent>
+              </CardContent>
+            </Card>
+            {me?.is_superadmin ? <div className="lg:col-span-2"><Channels /></div> : null}
+            <Card>
+              <CardHeader className="pb-2"><CardTitle className="text-base">Тенанты и пользователи</CardTitle></CardHeader>
+              <CardContent>
                 {me?.is_superadmin ? <Admins onCreated={(id) => void setCompany(id)} /> : <p className="text-muted-foreground text-sm">Карточку компании меняет администратор компании. Тенанты и почту сервера задает суперадминистратор.</p>}
-              </AccordionContent>
-            </AccordionItem>
-            <AccordionItem value="winrm" className="rounded-xl border px-4">
-              <AccordionTrigger>Как открыть контроллер</AccordionTrigger>
-              <AccordionContent><pre className="bg-muted overflow-auto rounded-lg p-3 text-xs whitespace-pre-wrap">{WINRM}</pre></AccordionContent>
-            </AccordionItem>
-            <AccordionItem value="scripts" className="rounded-xl border px-4">
-              <AccordionTrigger>Сборщик и ловушки</AccordionTrigger>
-              <AccordionContent><Scripts /></AccordionContent>
-            </AccordionItem>
-          </Accordion>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2"><CardTitle className="text-base">Как открыть контроллер</CardTitle></CardHeader>
+              <CardContent><pre className="bg-muted overflow-auto rounded-lg p-3 text-xs whitespace-pre-wrap">{WINRM}</pre></CardContent>
+            </Card>
+            <div className="lg:col-span-2"><Honey /></div>
+          </div>
         </TabsContent>
         <TabsContent value="audit" className="pt-3">
           <AuditLog />
@@ -392,25 +373,31 @@ function Admins({ onCreated }: { onCreated: (id: number) => void }) {
   )
 }
 
-function Scripts() {
+function Honey() {
   const { companyId, reload } = useApp()
-  const [collector, setCollector] = useState("")
   const [honey, setHoney] = useState("")
+  const steps = [
+    ["Зачем", "Ловушка — обычная на вид учётная запись и скрытая папка, которыми никто не должен пользоваться. Любой вход, запрос билета или чтение папки — сигнал, что каталог кто-то обходит."],
+    ["Что создаётся", "Подразделение Honey, непривилегированная учётная запись с именем службы, ограничение входа на несуществующий компьютер и скрытая общая папка с аудитом чтения. В группы администраторов запись не добавляется."],
+    ["Кто запускает", "Один раз на контроллере, из PowerShell, от имени администратора домена. Платформа сама объекты в каталоге не создаёт: скрипт только копируется."],
+    ["Как запустить", "Нажмите «Собрать скрипт», прочитайте его, скопируйте на контроллер и выполните. Пароль создаётся в памяти и на экран не выводится. Повторный запуск не печатает старый пароль."],
+    ["Что смотреть", "События 4769 для имени службы ловушки, 4624 и 4625 для входа, 5140 и 5145 для чтения папки. Сработку оформляют как инцидент. Саму ловушку при этом не отключают и прав ей не дают."],
+  ]
   return (
     <Card>
-      <CardHeader><CardTitle>Сборщик и ловушки</CardTitle></CardHeader>
-      <CardContent className="grid gap-3">
-        <p className="text-muted-foreground text-sm">Скрипт сборщика запускают на компьютере, где офицер уже вошел в домен. Он запускает SharpHound на этом компьютере и отправляет архив на сервер. Пароль домена в скрипт не записывается. Это не инвентаризация программ: установленное ПО сервер читает сам, со вкладки «Сканирование». Скрипт ловушек создает непривилегированные приманки и не показывает пароль.</p>
-        <div className="flex flex-wrap gap-2">
-          <Button onClick={() => void api<{ script: string }>("/api/collector/script?company_id=" + companyId).then((data) => setCollector(data.script)).catch((error: unknown) => setCollector(error instanceof Error ? error.message : ""))}>Собрать скрипт сборщика</Button>
-          <Button variant="outline" onClick={() => void navigator.clipboard.writeText(collector)}>Копировать</Button>
-        </div>
-        {collector ? <pre className="bg-muted max-h-64 overflow-auto rounded-lg p-3 text-xs whitespace-pre-wrap">{collector}</pre> : null}
-        <div className="flex flex-wrap gap-2">
+      <CardHeader className="pb-2"><CardTitle className="text-base">Ловушки для администратора ИБ</CardTitle></CardHeader>
+      <CardContent className="grid gap-3 lg:grid-cols-2">
+        {steps.map(([title, text]) => (
+          <div key={title} className="rounded-xl border p-3">
+            <div className="text-sm font-medium">{title}</div>
+            <p className="text-muted-foreground mt-1 text-sm">{text}</p>
+          </div>
+        ))}
+        <div className="flex flex-wrap gap-2 lg:col-span-2">
           <Button onClick={() => void api<{ script: string }>("/api/honeytokens/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ company_id: companyId }) }).then(async (data) => { setHoney(data.script); await reload() }).catch((error: unknown) => setHoney(error instanceof Error ? error.message : ""))}>Собрать скрипт ловушек</Button>
-          <Button variant="outline" onClick={() => void navigator.clipboard.writeText(honey)}>Копировать</Button>
+          <Button variant="outline" disabled={!honey} onClick={() => void navigator.clipboard.writeText(honey)}>Копировать</Button>
         </div>
-        {honey ? <pre className="bg-muted max-h-64 overflow-auto rounded-lg p-3 text-xs whitespace-pre-wrap">{honey}</pre> : null}
+        {honey ? <pre className="bg-muted max-h-64 overflow-auto rounded-lg p-3 text-xs whitespace-pre-wrap lg:col-span-2">{honey}</pre> : <p className="text-muted-foreground text-xs lg:col-span-2">Скрипт появится здесь. Пароль в нём не записан.</p>}
       </CardContent>
     </Card>
   )

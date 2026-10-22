@@ -21,8 +21,15 @@ try {
   $smb = Get-SmbServerConfiguration -ErrorAction Stop
   if ($smb.EnableSMB1Protocol) { Emit 'active_smbv1' 'critical' 'Включен SMBv1' 'Серверный компонент SMBv1 еще принимает подключения.' }
   if (-not $smb.RequireSecuritySignature) { Emit 'smb_signing_off' 'high' 'Подпись SMB не обязательна' 'RequireSecuritySignature выключен.' }
+  if (-not $smb.EncryptData) { Emit 'smb_encryption_off' 'medium' 'Шифрование SMB выключено' 'EncryptData не включен. Включайте его там, где клиенты уже умеют шифровать SMB.' }
 } catch {
   Emit 'smb_unreadable' 'medium' 'Конфигурация SMB не прочитана' $_.Exception.Message
+}
+try {
+  $client = Get-SmbClientConfiguration -ErrorAction Stop
+  if (-not $client.RequireSecuritySignature) { Emit 'smb_client_signing_off' 'medium' 'Клиент SMB не требует подписи' 'RequireSecuritySignature клиента выключен.' }
+} catch {
+  Emit 'smb_client_unreadable' 'low' 'Клиент SMB не прочитан' $_.Exception.Message
 }
 $llmnr = (Get-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient' -Name EnableMulticast -ErrorAction SilentlyContinue).EnableMulticast
 if ($null -eq $llmnr -or [int]$llmnr -ne 0) { Emit 'llmnr_enabled' 'high' 'LLMNR не отключен' 'Политика DNS Client не запрещает мультикаст имен.' }
