@@ -6,7 +6,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { PageHead } from "@/components/bits"
 import type { WikiItem } from "@/lib/types"
-import { KNOWLEDGE, type KnowledgeArticle } from "@/lib/knowledge"
+import { KNOWLEDGE } from "@/lib/knowledge"
 import { useApp } from "@/app-state"
 
 function loadWiki() {
@@ -30,7 +30,7 @@ const DOCS = {
   ru: [
     ["start", "С чего начать", "Каталог читает Linux по LDAP или LDAPS. SharpHound ставится на любой Windows-компьютер в домене. На контроллер его ставить не обязательно. Настрой LDAP/LDAPS, установи BloodHound и приступай к сканированию!"],
     ["ldap", "Каталог: LDAPS 636 и простой LDAP 389", "В настройках укажите DNS-имя контроллера и служебную учетную запись этого же домена. Формат DOMAIN\\user или user@domain. Права администратора домена не нужны, достаточно чтения. LDAPS 636 — если на контроллере есть сертификат. LDAP 389 — обычный канал без шифрования, только внутри доверенной сети. Гигиена, доверия и типы шифрования Kerberos идут этим каналом."],
-    ["areas", "Области аудита", "Учетные записи: пароли, блокировка, служебные записи, точечные политики. Устройства: устаревшие ОС, пароль компьютера, покрытие LAPS без чтения пароля, пустые подразделения. Пути: делегирование, SPN, шаблоны сертификатов, только признаки. Группы: пустые, слишком большие и слишком глубоко вложенные, без списка участников. DNS: имя зоны, без разбора двоичных записей. Разбор каждого параметра GPO, живые события входа и характеристики железа в продукт не входят."],
+    ["areas", "Области аудита", "Учетные записи: пароли, блокировка, служебные записи, точечные политики. Устройства: устаревшие ОС, пароль компьютера, покрытие LAPS без чтения пароля, пустые подразделения. Пути: делегирование, SPN, шаблоны сертификатов, только признаки. Группы: пустые, слишком большие и слишком глубоко вложенные, без списка участников. DNS: свойства зоны без содержимого. Контроллеры: процессор, память, диск и счётчики входов за сутки без текста чужих сессий."],
     ["sh", "Как установить SharpHound", "Возьмите SharpHound.exe из выпусков SpecterOps той же ветки, что понимает BloodHound CE. Распакуйте в C:\\Tools\\SharpHound. Сбор: SharpHound.exe -c DCOnly,Session,LocalAdmin,CA --zipfilename brosec --nosavecache. Хеши и билеты не выгружаются. Zip загружается в пункт меню SharpHound."],
     ["link", "Как связать программу с сервером", "SharpHound запускается вручную на компьютере, где офицер уже вошел в домен, и загружается со своей страницы. Реестр, время, SYSVOL и установленные программы сервер читает по WinRM. Значение cpassword не расшифровывается. Сборщик в настройках не содержит пароль домена."],
     ["mail", "Почта, Telegram и ассистент", "Суперадминистратор задает SMTP и бота Telegram. Пароль и токен обратно в браузер не возвращаются. После сканирования уходят письмо и сообщение, если каналы настроены. Модель ассистента подключается адресом в формате OpenAI, путь заканчивается на /v1."],
@@ -66,21 +66,27 @@ export function Docs() {
   const [group, setGroup] = useState("all")
   const [open, setOpen] = useState<string[]>(["start"])
   const [card, setCard] = useState<WikiItem | null>(null)
-  const [article, setArticle] = useState<KnowledgeArticle | null>(null)
   const [copied, setCopied] = useState("")
 
   useEffect(() => {
     void loadWiki().then(setItems)
   }, [])
 
-  const articles = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    return KNOWLEDGE.filter((item) => !q || [item.id, item.title, item.what, item.why, item.impact, item.letter].join(" ").toLowerCase().includes(q))
-  }, [query])
-
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
-    return items.filter((item) => item.g !== "pingcastle" && (group === "all" || item.g === group) && (!q || [item.id, item.title, item.text, item.family, item.what, item.impact, item.fix].join(" ").toLowerCase().includes(q)))
+    const wiki = items.filter((item) => item.g !== "pingcastle")
+    const ids = new Set(wiki.map((item) => item.id))
+    const extra: WikiItem[] = KNOWLEDGE.filter((item) => !ids.has(item.id)).map((item) => ({
+      id: item.id,
+      title: item.title,
+      text: item.what,
+      g: "platform",
+      what: item.what,
+      impact: item.impact,
+      fix: item.defense.join(" "),
+      sev: item.severity,
+    }))
+    return [...wiki, ...extra].filter((item) => (group === "all" || item.g === group) && (!q || [item.id, item.title, item.text, item.family, item.what, item.impact, item.fix].join(" ").toLowerCase().includes(q)))
   }, [group, items, query])
 
   const docs = DOCS[lang]
@@ -94,19 +100,7 @@ export function Docs() {
         <Button variant="outline" onClick={() => setOpen([])}>Свернуть все</Button>
         <Input className="max-w-sm" value={query} placeholder="Поиск по справочнику: SMB, LDAP, GPO..." onChange={(event) => setQuery(event.target.value)} />
       </div>
-      <section className="mb-6 grid gap-2">
-        <h2 className="text-base font-medium">База знаний</h2>
-        <p className="text-muted-foreground text-sm">Разбор проверки: что это, зачем так сделано, чем кончается и текст, который можно отправить администраторам. Команд в разборе нет. Это первая волна, остальные проверки справочника дополняются следующими версиями.</p>
-        <div className="grid gap-2 sm:grid-cols-2">
-          {articles.map((item) => (
-            <button key={item.id} type="button" className="hover:bg-muted/50 rounded-lg border p-3 text-left" onClick={() => { setArticle(item); setCopied("") }}>
-              <div className="text-sm font-medium">{item.title}</div>
-              <p className="text-muted-foreground mt-1 line-clamp-2 text-xs">{item.what}</p>
-            </button>
-          ))}
-        </div>
-        {!articles.length ? <p className="text-muted-foreground text-sm">В базе знаний по этому запросу ничего нет.</p> : null}
-      </section>
+      <p className="text-muted-foreground mb-4 text-sm">Один список проверок. В карточке: что это, зачем, чем кончается, как закрыть и текст для администраторов. Команд в разборе нет.</p>
       <Accordion type="multiple" value={open} onValueChange={setOpen} className="mb-6">
         {docs.map(([id, title, text]) => (
           <AccordionItem key={id} value={id}>
@@ -141,50 +135,38 @@ export function Docs() {
             </DialogTitle>
             <DialogDescription>{[card?.id, card?.family].filter(Boolean).join(" · ")}</DialogDescription>
           </DialogHeader>
-          <section className="grid gap-1">
-            <h3 className="text-sm font-medium">Что это за параметр</h3>
-            <p className="text-muted-foreground text-sm">{card?.what || card?.text}</p>
-          </section>
-          <section className="grid gap-1">
-            <h3 className="text-sm font-medium">На что влияет</h3>
-            <p className="text-sm">{card?.impact || card?.text}</p>
-          </section>
-          <section className="grid gap-1">
-            <h3 className="text-sm font-medium">Как исправить</h3>
-            <p className="text-sm">{card?.fix || card?.text}</p>
-          </section>
+          {card ? <CheckArticle item={card} copied={copied} onCopy={setCopied} /> : null}
         </DialogContent>
       </Dialog>
-      <Dialog open={!!article} onOpenChange={(next) => { if (!next) setArticle(null) }}>
-        <DialogContent className="max-h-[85vh] overflow-auto sm:max-w-3xl">
-          <DialogHeader>
-            <DialogTitle>{article?.title}</DialogTitle>
-            <DialogDescription>{article?.id}</DialogDescription>
-          </DialogHeader>
-          {article ? (
-            <div className="grid gap-4 text-sm">
-              <section><h3 className="font-medium">Что это</h3><p className="text-muted-foreground">{article.what}</p></section>
-              <section><h3 className="font-medium">Зачем это существует</h3><p>{article.why}</p></section>
-              <section><h3 className="font-medium">Чем кончается</h3><p>{article.impact}</p></section>
-              <section>
-                <h3 className="font-medium">Что передать в работу</h3>
-                <ol className="mt-1 list-decimal space-y-1 pl-5">{article.defense.map((line) => <li key={line}>{line}</li>)}</ol>
-              </section>
-              <section className="grid gap-2">
-                <h3 className="font-medium">Письмо администраторам</h3>
-                <p className="bg-muted rounded-lg p-3 whitespace-pre-wrap">{article.letter}</p>
-                <Button variant="outline" onClick={() => { void navigator.clipboard.writeText(article.letter).then(() => setCopied(article.id)) }}>
-                  {copied === article.id ? "Скопировано" : "Скопировать текст письма"}
-                </Button>
-              </section>
-              <section className="grid gap-1">
-                <h3 className="font-medium">Источники</h3>
-                {article.links.map((link) => <a key={link.href} className="text-primary underline" href={link.href} target="_blank" rel="noreferrer">{link.title}</a>)}
-              </section>
-            </div>
-          ) : null}
-        </DialogContent>
-      </Dialog>
+    </div>
+  )
+}
+
+function CheckArticle({ item, copied, onCopy }: { item: WikiItem; copied: string; onCopy: (id: string) => void }) {
+  const rich = KNOWLEDGE.find((row) => row.id === item.id)
+  const letter = rich?.letter || `Коллеги, проверка «${item.title}» отмечена в BroSec. ${item.impact || item.text} Просьба: ${item.fix || "закрыть замечание и сообщить, когда можно перепроверить"}.`
+  return (
+    <div className="grid gap-4 text-sm">
+      <section><h3 className="font-medium">Что это</h3><p className="text-muted-foreground">{rich?.what || item.what || item.text}</p></section>
+      <section><h3 className="font-medium">Зачем это существует</h3><p>{rich?.why || "Параметр или программа оставлены в состоянии, которое ослабляет контроль домена."}</p></section>
+      <section><h3 className="font-medium">Чем кончается</h3><p>{rich?.impact || item.impact || item.text}</p></section>
+      <section>
+        <h3 className="font-medium">Что передать в работу</h3>
+        {rich ? <ol className="mt-1 list-decimal space-y-1 pl-5">{rich.defense.map((line) => <li key={line}>{line}</li>)}</ol> : <p>{item.fix || item.text}</p>}
+      </section>
+      <section className="grid gap-2">
+        <h3 className="font-medium">Письмо администраторам</h3>
+        <p className="bg-muted rounded-lg p-3 whitespace-pre-wrap">{letter}</p>
+        <Button variant="outline" onClick={() => { void navigator.clipboard.writeText(letter).then(() => onCopy(item.id || item.title)) }}>
+          {copied === (item.id || item.title) ? "Скопировано" : "Скопировать текст письма"}
+        </Button>
+      </section>
+      {rich?.links.length ? (
+        <section className="grid gap-1">
+          <h3 className="font-medium">Источники</h3>
+          {rich.links.map((link) => <a key={link.href} className="text-primary underline" href={link.href} target="_blank" rel="noreferrer">{link.title}</a>)}
+        </section>
+      ) : null}
     </div>
   )
 }

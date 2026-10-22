@@ -8,8 +8,11 @@ export class ApiError extends Error {
 
 export async function api<T>(url: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(url, { ...options, credentials: "same-origin" })
-  if (response.status === 401) throw new ApiError(401, "auth")
   const data = await response.json().catch(() => ({}))
+  if (response.status === 401) {
+    const detail = typeof data.detail === "string" ? data.detail : "auth"
+    throw new ApiError(401, detail)
+  }
   if (!response.ok) {
     const detail = typeof data.detail === "string" ? data.detail : "Запрос отклонен"
     throw new ApiError(response.status, detail)

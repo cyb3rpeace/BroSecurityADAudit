@@ -10,6 +10,7 @@ import os
 import re
 import secrets
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -47,12 +48,14 @@ from app.database import (
     AssistantSettings,
     NotifyChannel,
     ScanHistory,
+    AuthSession,
     SessionLocal,
     User,
     hash_password,
     init_db,
     verify_password,
 )
+from app.modules.account_auth import device_label, new_secret, otpauth_uri, qr_svg, totp_ok
 from app.modules.bloodhound import ingest_sharphound_zip, run_bloodhound
 from app.modules.dc_hardening import scan_hardening
 from app.modules.ldap_audit import directory_picture, list_computer_names, lookup_asset, probe_directory, scan_adcs_ldap, scan_hardening_ldap, scan_hygiene_ldap, scan_trusts_ldap
@@ -62,7 +65,7 @@ from app.modules.protocols import scan_protocols_ldap, scan_protocols_windows
 from app.modules.notifier_mail import send_report
 from app.modules.notifier_tg import send_summary
 from app.modules.posture import scan_hygiene, scan_time, scan_trusts
-from app.modules.software_scan import controller_extra, gpo_conflicts, last_interactive_user, repair_caption, scan_gpp, scan_software, validate_host
+from app.modules.software_scan import controller_extra, dns_zones, gpo_conflicts, last_interactive_user, repair_caption, scan_gpp, scan_software, validate_host
 
 load_dotenv(BASE_DIR / ".env")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -73,7 +76,7 @@ try:
 except Exception:
     TZ = ZoneInfo("UTC")
 
-PRODUCT_VERSION = "2.6.0"
+PRODUCT_VERSION = "2.6.6"
 
 ALLOWED_MODULES = (
     "bloodhound",
@@ -242,6 +245,23 @@ def get_db():
         db.close()
 
 
+def client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for", "")
+    host = forwarded.split(",")[0].strip() if forwarded else ""
+    if not host and request.client:
+        host = request.client.host or ""
+    return host[:64]
+
+
+def open_console_session(db: Session, request: Request, user: User) -> AuthSession:
+    row = AuthSession(user_id=user.id, ip=client_ip(request), device=device_label(request.headers.get("user-agent", "")))
+    db.add(row)
+    db.flush()
+    request.session["uid"] = user.id
+    request.session["sid"] = row.id
+    return row
+
+
 def get_user(request: Request, db: Session = Depends(get_db)) -> User:
     uid = request.session.get("uid")
     if not uid:
@@ -249,6 +269,19 @@ def get_user(request: Request, db: Session = Depends(get_db)) -> User:
     user = db.get(User, int(uid))
     if user is None:
         raise HTTPException(status_code=401, detail="Сессия недействительна")
+    sid = request.session.get("sid")
+    if sid:
+        row = db.get(AuthSession, int(sid))
+        if row is None or row.revoked or row.user_id != user.id:
+            request.session.clear()
+            raise HTTPException(status_code=401, detail="Сессия завершена")
+        if row.seen_at is None or (datetime.utcnow() - row.seen_at).total_seconds() > 60:
+            row.seen_at = datetime.utcnow()
+            row.ip = client_ip(request) or row.ip
+            db.commit()
+    else:
+        open_console_session(db, request, user)
+        db.commit()
     return user
 
 
@@ -1865,10 +1898,38 @@ def login(payload: LoginIn, request: Request, db: Session = Depends(get_db)) -> 
         write_audit(db, None, "login_failed", "Неудачная попытка входа", username=payload.username.strip()[:64])
         db.commit()
         raise HTTPException(status_code=401, detail="Неверный логин или пароль")
-    request.session["uid"] = user.id
+    if user.totp_enabled and user.totp_secret:
+        request.session.clear()
+        request.session["pending_uid"] = user.id
+        request.session["pending_exp"] = int(time.time()) + 300
+        write_audit(db, user, "login_totp", "Пароль принят, ждём код приложения", company_id=user.company_id)
+        db.commit()
+        return {"ok": False, "need_totp": True, "version": PRODUCT_VERSION}
+    open_console_session(db, request, user)
     write_audit(db, user, "login", "Вход в консоль", company_id=user.company_id)
     db.commit()
     return {"ok": True, "username": user.username, "role": user.role, "full_name": user.full_name, "company_id": user.company_id, "version": PRODUCT_VERSION}
+
+
+class TotpIn(BaseModel):
+    code: str = Field(min_length=6, max_length=8)
+
+
+@app.post("/api/login/totp")
+def login_totp(payload: TotpIn, request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
+    uid = request.session.get("pending_uid")
+    exp = int(request.session.get("pending_exp") or 0)
+    if not uid or exp < int(time.time()):
+        raise HTTPException(status_code=401, detail="Код больше не действует. Войдите снова")
+    user = db.get(User, int(uid))
+    if user is None or not totp_ok(user.totp_secret or "", payload.code):
+        raise HTTPException(status_code=401, detail="Неверный код")
+    request.session.pop("pending_uid", None)
+    request.session.pop("pending_exp", None)
+    open_console_session(db, request, user)
+    write_audit(db, user, "login", "Вход с кодом приложения", company_id=user.company_id)
+    db.commit()
+    return {"ok": True, "username": user.username, "version": PRODUCT_VERSION}
 
 
 @app.post("/api/logout")
@@ -1877,16 +1938,156 @@ def logout(request: Request) -> dict[str, bool]:
     return {"ok": True}
 
 
-@app.get("/api/me")
-def me(user: User = Depends(get_user)) -> dict[str, Any]:
+def profile_public(user: User) -> dict[str, Any]:
     return {
         "username": user.username,
         "role": user.role,
-        "full_name": user.full_name,
+        "full_name": user.full_name or "",
+        "email": user.email or "",
+        "phone": user.phone or "",
+        "locale": user.locale or "ru",
+        "totp_enabled": bool(user.totp_enabled),
         "company_id": user.company_id,
         "is_superadmin": user.role == "superadmin",
         "version": PRODUCT_VERSION,
     }
+
+
+@app.get("/api/me")
+def me(user: User = Depends(get_user)) -> dict[str, Any]:
+    return profile_public(user)
+
+
+class ProfileIn(BaseModel):
+    full_name: str = Field(default="", max_length=255)
+    email: str = Field(default="", max_length=255)
+    phone: str = Field(default="", max_length=32)
+    locale: str = "ru"
+
+
+@app.put("/api/me")
+def update_me(payload: ProfileIn, user: User = Depends(get_user), db: Session = Depends(get_db)) -> dict[str, Any]:
+    email = payload.email.strip()
+    if email and ("@" not in email or "." not in email.split("@")[-1]):
+        raise HTTPException(status_code=400, detail="Почта выглядит неполной")
+    phone = payload.phone.strip()
+    if phone and not re.fullmatch(r"[0-9+\-() ]{6,32}", phone):
+        raise HTTPException(status_code=400, detail="Телефон содержит лишние символы")
+    user.full_name = payload.full_name.strip()
+    user.email = email
+    user.phone = phone
+    user.locale = "en" if payload.locale == "en" else "ru"
+    write_audit(db, user, "profile", "Обновлена персональная информация", company_id=user.company_id)
+    db.commit()
+    return profile_public(user)
+
+
+@app.get("/api/me/projects")
+def my_projects(user: User = Depends(get_user), db: Session = Depends(get_db)) -> list[dict[str, Any]]:
+    if user.role == "superadmin":
+        rows = db.query(Company).order_by(Company.name).all()
+        role = "Суперадминистратор"
+    else:
+        company = db.get(Company, user.company_id) if user.company_id else None
+        rows = [company] if company else []
+        role = "Администратор компании" if user.role == "company_admin" else user.role
+    return [{"id": row.id, "name": row.name, "domain": row.domain or "", "role": role} for row in rows]
+
+
+class PasswordChange(BaseModel):
+    current: str = Field(min_length=1, max_length=128)
+    new: str = Field(min_length=10, max_length=128)
+
+
+@app.post("/api/me/password")
+def change_password(payload: PasswordChange, user: User = Depends(get_user), db: Session = Depends(get_db)) -> dict[str, bool]:
+    if not verify_password(payload.current, user.password_hash):
+        raise HTTPException(status_code=400, detail="Текущий пароль не подошёл")
+    if payload.current == payload.new:
+        raise HTTPException(status_code=400, detail="Новый пароль совпадает с текущим")
+    user.password_hash = hash_password(payload.new)
+    write_audit(db, user, "password", "Пароль изменён", company_id=user.company_id)
+    db.commit()
+    return {"ok": True}
+
+
+@app.post("/api/me/totp/start")
+def totp_start(user: User = Depends(get_user), db: Session = Depends(get_db)) -> dict[str, str]:
+    if user.totp_enabled:
+        raise HTTPException(status_code=400, detail="Код приложения уже включён")
+    secret = new_secret()
+    user.totp_secret = secret
+    user.totp_enabled = 0
+    db.commit()
+    uri = otpauth_uri(user.username, secret)
+    return {"secret": secret, "svg": qr_svg(uri)}
+
+
+class TotpConfirm(BaseModel):
+    code: str = Field(min_length=6, max_length=8)
+
+
+@app.post("/api/me/totp/confirm")
+def totp_confirm(payload: TotpConfirm, user: User = Depends(get_user), db: Session = Depends(get_db)) -> dict[str, bool]:
+    if not user.totp_secret or not totp_ok(user.totp_secret, payload.code):
+        raise HTTPException(status_code=400, detail="Код не подошёл. Проверьте время на телефоне")
+    user.totp_enabled = 1
+    write_audit(db, user, "totp_on", "Включён код приложения", company_id=user.company_id)
+    db.commit()
+    return {"ok": True}
+
+
+class TotpOff(BaseModel):
+    password: str = Field(min_length=1, max_length=128)
+
+
+@app.post("/api/me/totp/disable")
+def totp_disable(payload: TotpOff, user: User = Depends(get_user), db: Session = Depends(get_db)) -> dict[str, bool]:
+    if not verify_password(payload.password, user.password_hash):
+        raise HTTPException(status_code=400, detail="Пароль не подошёл")
+    user.totp_secret = ""
+    user.totp_enabled = 0
+    write_audit(db, user, "totp_off", "Код приложения выключен", company_id=user.company_id)
+    db.commit()
+    return {"ok": True}
+
+
+def session_rows(db: Session, user: User, current: int | None) -> list[dict[str, Any]]:
+    rows = (
+        db.query(AuthSession)
+        .filter(AuthSession.user_id == user.id, AuthSession.revoked == 0)
+        .order_by(AuthSession.seen_at.desc())
+        .limit(20)
+        .all()
+    )
+    return [
+        {
+            "id": row.id,
+            "ip": row.ip or "не определён",
+            "device": row.device or "Устройство",
+            "at": stamp(row.seen_at or row.created_at),
+            "current": row.id == current,
+        }
+        for row in rows
+    ]
+
+
+@app.get("/api/me/sessions")
+def my_sessions(request: Request, user: User = Depends(get_user), db: Session = Depends(get_db)) -> list[dict[str, Any]]:
+    sid = request.session.get("sid")
+    return session_rows(db, user, int(sid) if sid else None)
+
+
+@app.post("/api/me/sessions/revoke-others")
+def revoke_other_sessions(request: Request, user: User = Depends(get_user), db: Session = Depends(get_db)) -> dict[str, int]:
+    sid = int(request.session.get("sid") or 0)
+    query = db.query(AuthSession).filter(AuthSession.user_id == user.id, AuthSession.revoked == 0)
+    if sid:
+        query = query.filter(AuthSession.id != sid)
+    count = query.update({AuthSession.revoked: 1}, synchronize_session=False)
+    write_audit(db, user, "sessions", "Завершены другие сеансы", company_id=user.company_id)
+    db.commit()
+    return {"ok": True, "closed": int(count or 0)}
 
 
 _directory_cache: dict[int, tuple[float, dict[str, Any]]] = {}
@@ -1999,12 +2200,20 @@ def directory_windows(company_id: int, user: User = Depends(get_user), db: Sessi
     win["transport"] = windows_mode_of(company)
     controllers = controller_extra(win, hosts)
     diff = gpo_conflicts(win, names)
+    zones = dns_zones(win)
+    zones["wildcard"] = bool(picture.get("wildcard"))
+    matrix = []
+    for row in controllers:
+        for partner in row.get("partners") or []:
+            matrix.append({"source": row.get("host") or "", **partner})
     readable = sum(1 for row in controllers if row.get("ok"))
     return {
-        "ok": bool(readable or diff.get("ok")),
+        "ok": bool(readable or diff.get("ok") or zones.get("ok")),
         "controllers": controllers,
         "conflicts": diff.get("conflicts") or [],
-        "message": f"Контроллеров ответило: {readable} из {len(hosts[:6])}. {diff.get('message') or ''}".strip(),
+        "replication": matrix[:80],
+        "dns": zones,
+        "message": f"Контроллеров ответило: {readable} из {len(hosts[:6])}. Связей репликации: {len(matrix)}. {diff.get('message') or ''} {zones.get('message') or ''}".strip(),
     }
 
 

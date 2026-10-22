@@ -40,8 +40,10 @@ type Ctx = {
   liveStatus: string
   watchScan: (id: number) => void
   t: (key: string) => string
-  login: (username: string, password: string) => Promise<void>
+  login: (username: string, password: string) => Promise<"ok" | "totp">
+  confirmTotp: (code: string) => Promise<void>
   logout: () => Promise<void>
+  refreshMe: () => Promise<void>
   setView: (view: View) => void
   setLang: (lang: Lang) => void
   setTheme: (theme: Theme) => void
@@ -176,10 +178,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [loadCompanies])
 
   const login = useCallback(async (username: string, password: string) => {
-    await api("/api/login", {
+    const data = await api<{ need_totp?: boolean }>("/api/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ username, password }),
+    })
+    if (data.need_totp) return "totp" as const
+    setLoading(true)
+    try {
+      await boot()
+    } finally {
+      setLoading(false)
+    }
+    return "ok" as const
+  }, [boot])
+
+  const confirmTotp = useCallback(async (code: string) => {
+    await api("/api/login/totp", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code }),
     })
     setLoading(true)
     try {
@@ -188,6 +206,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setLoading(false)
     }
   }, [boot])
+
+  const refreshMe = useCallback(async () => {
+    const user = await api<Me>("/api/me")
+    setMe(user)
+  }, [])
 
   const logout = useCallback(async () => {
     await api("/api/logout", { method: "POST" })
@@ -288,13 +311,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const value = useMemo<Ctx>(() => ({
     loading, me, companies, companyId, company, inventory, timeline, compare, mitre, demo, scheduler,
-    view, lang, theme, filters, remedy, focus, statusTick, notices, directory, live, liveStatus, watchScan, t, login, logout, setView, setLang, setTheme,
+    view, lang, theme, filters, remedy, focus, statusTick, notices, directory, live, liveStatus, watchScan, t, login, confirmTotp, logout, refreshMe, setView, setLang, setTheme,
     patchFilters, setCompany, reload, openFinding, closeFinding: () => { setRemedy(null); setFocus(null) },
     bumpStatus: () => setStatusTick((n) => n + 1),
     markNotice, markAllNotices, deleteNotice,
   }), [
     loading, me, companies, companyId, company, inventory, timeline, compare, mitre, demo, scheduler,
-    view, lang, theme, filters, remedy, focus, statusTick, notices, directory, live, liveStatus, watchScan, t, login, logout, setLang, setTheme,
+    view, lang, theme, filters, remedy, focus, statusTick, notices, directory, live, liveStatus, watchScan, t, login, confirmTotp, logout, refreshMe, setLang, setTheme,
     patchFilters, setCompany, reload, openFinding, markNotice, markAllNotices, deleteNotice,
   ])
 

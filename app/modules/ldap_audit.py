@@ -929,14 +929,33 @@ def directory_picture(connection: dict[str, Any]) -> dict[str, Any]:
                 name = str(_first(entry, "name") or "")
                 if name and name not in zones:
                     zones.append(name)
+        wildcard = False
+        for suffix in (f"CN=MicrosoftDNS,DC=DomainDnsZones,{base}", f"CN=MicrosoftDNS,DC=ForestDnsZones,{base}"):
+            if _safe_search(conn, suffix, "(&(objectClass=dnsNode)(dc=\\2a))", ["dc"], 1):
+                wildcard = True
+                break
         ous = [str(_first(entry, "ou") or "") for entry in _safe_search(conn, base, "(objectClass=organizationalUnit)", ["ou"], 40)]
         groups = []
-        for entry in _safe_search(conn, base, "(objectCategory=group)", ["cn", "groupType"], 40):
+        for entry in _safe_search(conn, base, "(objectCategory=group)", ["cn", "groupType", "member"], 40):
             try:
                 kind = int(_first(entry, "groupType") or 0)
             except (TypeError, ValueError):
                 kind = 0
-            groups.append({"name": str(_first(entry, "cn") or ""), "security": bool(kind & 0x80000000)})
+            raw = entry["member"].value if "member" in entry else None
+            listed = raw if isinstance(raw, list) else ([raw] if raw else [])
+            names = []
+            for item in listed:
+                if len(names) >= 24:
+                    break
+                cn = next((part[3:] for part in str(item).split(",") if part.upper().startswith("CN=")), "")
+                if cn:
+                    names.append(cn[:64])
+            groups.append({
+                "name": str(_first(entry, "cn") or ""),
+                "security": bool(kind & 0x80000000),
+                "members": names,
+                "member_count": len([item for item in listed if item]),
+            })
         gpos = []
         flag_text = {0: "включена", 1: "выключена часть пользователя", 2: "выключена часть компьютера", 3: "выключена"}
         for entry in _safe_search(conn, f"CN=Policies,CN=System,{base}", "(objectClass=groupPolicyContainer)", ["cn", "displayName", "flags"], 60):
@@ -966,7 +985,7 @@ def directory_picture(connection: dict[str, Any]) -> dict[str, Any]:
         roles = [item for item in (pdc, _role_cn(_owner(conn, f"CN=RID Manager$,CN=System,{base}")), _role_cn(_owner(conn, f"CN=Infrastructure,CN=System,{base}"))) if item]
         return {
             "ok": True,
-            "message": "Каталог прочитан. Участники групп, записи DNS, параметры GPO и железо контроллеров не запрашивались.",
+            "message": "Каталог прочитан. В группах показаны первые участники. Состав зон — это количество записей по типам, имена записей не копируются.",
             "domain": base,
             "level": level,
             "policy": policy,
@@ -975,6 +994,7 @@ def directory_picture(connection: dict[str, Any]) -> dict[str, Any]:
             "sites": sites,
             "subnets": subnets,
             "zones": zones,
+            "wildcard": wildcard,
             "ous": [name for name in ous if name],
             "groups": groups,
             "gpos": gpos,

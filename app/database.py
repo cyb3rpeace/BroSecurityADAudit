@@ -100,6 +100,25 @@ class User(Base):
     role = Column(String(32), nullable=False)
     company_id = Column(Integer, ForeignKey("companies.id"), nullable=True)
     full_name = Column(String(255), default="")
+    email = Column(String(255), default="")
+    phone = Column(String(32), default="")
+    locale = Column(String(8), default="ru")
+    totp_secret = Column(String(64), default="")
+    totp_enabled = Column(Integer, default=0)
+
+
+class AuthSession(Base):
+    """Сеанс входа в консоль. Пароль и код приложения сюда не пишутся."""
+
+    __tablename__ = "auth_sessions"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    ip = Column(String(64), default="")
+    device = Column(String(255), default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    seen_at = Column(DateTime, default=datetime.utcnow)
+    revoked = Column(Integer, default=0)
 
 
 class ScanHistory(Base):
@@ -245,6 +264,16 @@ def _ensure_columns() -> None:
         notify_names = {row[1] for row in conn.execute(text("PRAGMA table_info(notify_channel)")).fetchall()}
         if notify_names and "prefs" not in notify_names:
             conn.execute(text("ALTER TABLE notify_channel ADD COLUMN prefs TEXT DEFAULT ''"))
+        user_names = {row[1] for row in conn.execute(text("PRAGMA table_info(users)")).fetchall()}
+        for name, ddl in (
+            ("email", "VARCHAR(255) DEFAULT ''"),
+            ("phone", "VARCHAR(32) DEFAULT ''"),
+            ("locale", "VARCHAR(8) DEFAULT 'ru'"),
+            ("totp_secret", "VARCHAR(64) DEFAULT ''"),
+            ("totp_enabled", "INTEGER DEFAULT 0"),
+        ):
+            if user_names and name not in user_names:
+                conn.execute(text(f"ALTER TABLE users ADD COLUMN {name} {ddl}"))
 
 
 def init_db() -> None:

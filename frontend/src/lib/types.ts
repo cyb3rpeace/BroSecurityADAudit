@@ -15,6 +15,8 @@ export type View =
   | "assistant"
   | "notes"
   | "catalog"
+  | "profile"
+  | "security"
 
 export type Me = {
   username: string

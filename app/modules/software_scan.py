@@ -86,6 +86,13 @@ BLACKLIST = (
 )
 
 
+def _listed(needle: str, lowered: str) -> bool:
+    """Совпадение по целому имени. «todesk» не срабатывает внутри AutoDesk."""
+    if " " in needle:
+        return needle in lowered
+    return re.search(r"(?<![a-z0-9])" + re.escape(needle) + r"(?![a-z0-9])", lowered) is not None
+
+
 def validate_host(host: str) -> str:
     value = (host or "").strip().rstrip(".")
     if not HOST_RE.match(value):
@@ -349,7 +356,7 @@ def _read_software_host(connection: dict[str, Any], host: str) -> tuple[str, lis
         name = str(app.get("DisplayName") or "")
         lowered = name.lower()
         for needle, label, vuln_id, severity in BLACKLIST:
-            if needle in lowered:
+            if _listed(needle, lowered):
                 app_version = str(app.get("DisplayVersion") or "").strip()
                 title = label if not app_version else f"{label} {app_version}"
                 findings.append(
@@ -358,7 +365,7 @@ def _read_software_host(connection: dict[str, Any], host: str) -> tuple[str, lis
                         "category": "Shadow IT",
                         "title": title,
                         "severity": severity,
-                        "detail": f"Издатель: {app.get('Publisher') or 'не указан'}. Продукт найден в ветке Uninstall и входит в черный список удаленного доступа и VPN.",
+                        "detail": f"Продукт: {name}. Издатель: {app.get('Publisher') or 'не указан'}. Найден в ветке Uninstall.",
                         "tags": f"shadow_it,{needle},module:software_audit",
                         "vuln_id": vuln_id,
                     }
@@ -564,10 +571,12 @@ _DC_EXTRA_PS = r"""
 $ErrorActionPreference = 'Continue'
 $since = (Get-Date).AddHours(-24)
 function Count-Id([int]$id) {
-  try { return @(Get-WinEvent -FilterHashtable @{LogName='Security'; Id=$id; StartTime=$since} -ErrorAction Stop).Count }
-  catch { return -1 }
+  try { return @(Get-WinEvent -FilterHashtable @{LogName='Security'; Id=$id; StartTime=$since} -MaxEvents 20000 -ErrorAction Stop).Count }
+  catch {
+    if ($_.Exception.Message -match 'No events were found') { return 0 }
+    return -1
+  }
 }
-Write-Output ('COUNT|' + (Count-Id 4625) + '|' + (Count-Id 4740))
 try {
   $cs = Get-CimInstance Win32_ComputerSystem
   $os = Get-CimInstance Win32_OperatingSystem
@@ -583,7 +592,89 @@ try {
   $cpuName = (([string]$cpu.Name) -replace '\|','/')
   Write-Output ('HW|' + $maker + '|' + $model + '|' + $ram + '|' + $freeRam + '|' + $cpuName + '|' + $freeDisk)
 } catch { Write-Output 'HW_FAIL' }
+Write-Output ('COUNT|' + (Count-Id 4625) + '|' + (Count-Id 4740))
+try {
+  Import-Module ActiveDirectory -ErrorAction Stop
+  $now = Get-Date
+  $meta = @(Get-ADReplicationPartnerMetadata -Target $env:COMPUTERNAME -Scope Server -ErrorAction Stop)
+  $sent = 0
+  foreach ($p in $meta) {
+    if ($sent -ge 20) { break }
+    $partner = [string]$p.Partner
+    if ($partner -match 'CN=NTDS Settings,CN=([^,]+)') { $partner = $Matches[1] }
+    elseif ($partner -match 'CN=([^,]+)') { $partner = $Matches[1] }
+    $partner = ($partner -replace '\|','/')
+    $part = [string]$p.Partition
+    if ($part -match '^DC=([^,]+)') { $part = $Matches[1] }
+    elseif ($part -match 'CN=([^,]+)') { $part = $Matches[1] }
+    $part = ($part -replace '\|','/')
+    $hours = -1
+    if ($p.LastReplicationSuccess -and $p.LastReplicationSuccess.Year -gt 1900) {
+      $hours = [math]::Round(($now - $p.LastReplicationSuccess).TotalHours, 1)
+    }
+    $code = 0
+    try { $code = [int]$p.LastReplicationResult } catch { $code = 0 }
+    $fails = 0
+    try { $fails = [int]$p.ConsecutiveFailureCount } catch { $fails = 0 }
+    Write-Output ('REPL|' + $partner + '|' + $part + '|' + $hours + '|' + $code + '|' + $fails)
+    $sent++
+  }
+} catch { Write-Output 'REPL_FAIL' }
 Write-Output 'DC_DONE'
+"""
+
+_DNS_ZONE_PS = r"""
+$ErrorActionPreference = 'Continue'
+try { Import-Module DnsServer -ErrorAction Stop } catch { Write-Output 'DNS_FAIL'; Write-Output 'DNS_DONE'; exit }
+$zones = @(Get-DnsServerZone -ErrorAction SilentlyContinue | Where-Object { -not $_.IsAutoCreated } | Select-Object -First 40)
+foreach ($z in $zones) {
+  $name = (([string]$z.ZoneName) -replace '\|','/')
+  if (-not $name -or $name.Length -gt 80) { continue }
+  $aging = '0'
+  try {
+    $ag = Get-DnsServerZoneAging -Name $z.ZoneName -ErrorAction SilentlyContinue
+    if ($ag -and $ag.AgingEnabled) { $aging = '1' }
+  } catch {}
+  $dyn = (([string]$z.DynamicUpdate) -replace '\|','/')
+  $xfer = (([string]$z.SecureSecondaries) -replace '\|','/')
+  $type = (([string]$z.ZoneType) -replace '\|','/')
+  $scope = (([string]$z.ReplicationScope) -replace '\|','/')
+  $rev = '0'
+  if ($z.IsReverseLookupZone) { $rev = '1' }
+  Write-Output ('ZONE|' + $name + '|' + $type + '|' + $scope + '|' + $dyn + '|' + $xfer + '|' + $aging + '|' + $rev)
+}
+$counted = 0
+foreach ($z in $zones) {
+  if ($counted -ge 12) { break }
+  $name = [string]$z.ZoneName
+  if (-not $name) { continue }
+  $bag = @{}
+  $seen = 0
+  foreach ($r in @(Get-DnsServerResourceRecord -ZoneName $name -ErrorAction SilentlyContinue)) {
+    $seen++
+    if ($seen -gt 2000) { break }
+    $t = [string]$r.RecordType
+    if (-not $t) { continue }
+    if ($bag.ContainsKey($t)) { $bag[$t]++ } else { $bag[$t] = 1 }
+  }
+  $parts = ($bag.GetEnumerator() | ForEach-Object { $_.Key + '=' + $_.Value }) -join ','
+  Write-Output ('STAT|' + (($name -replace '\|','/')) + '|' + $parts)
+  $counted++
+}
+try {
+  Import-Module ActiveDirectory -ErrorAction Stop
+  $domain = [string](Get-ADDomain -Server $env:COMPUTERNAME).DNSRoot
+  foreach ($label in @('_ldap._tcp','_kerberos._tcp','_gc._tcp')) {
+    $q = $label + '.' + $domain
+    $ok = '0'
+    try {
+      $ans = @(Resolve-DnsName -Name $q -Type SRV -Server $env:COMPUTERNAME -ErrorAction Stop)
+      if ($ans.Count -gt 0) { $ok = '1' }
+    } catch {}
+    Write-Output ('LOC|' + $label + '|' + $ok)
+  }
+} catch { Write-Output 'LOC_FAIL' }
+Write-Output 'DNS_DONE'
 """
 
 _LAST_USER_PS = r"""
@@ -690,8 +781,101 @@ def controller_extra(connection: dict[str, Any], hosts: list[str]) -> list[dict[
                         "cpu": parts[5],
                         "disk_free_pct": parts[6],
                     })
+            elif line.startswith("REPL|"):
+                parts = line.split("|")
+                if len(parts) >= 6:
+                    item.setdefault("partners", []).append({
+                        "partner": parts[1][:80],
+                        "partition": parts[2][:40],
+                        "hours": parts[3],
+                        "code": parts[4],
+                        "fails": parts[5],
+                        "state": _repl_state(parts[3], parts[4], parts[5]),
+                    })
+            elif line == "REPL_FAIL":
+                item["repl_ok"] = False
+        if "repl_ok" not in item:
+            item["repl_ok"] = "partners" in item or "REPL_FAIL" not in (remote.get("stdout") or "")
         rows.append(item)
     return rows
+
+
+def _repl_state(hours: str, code: str, fails: str) -> str:
+    try:
+        result = int(float(code))
+        failed = int(float(fails))
+        age = float(hours)
+    except ValueError:
+        return "не прочитано"
+    if result != 0 or failed > 0:
+        return "сбой"
+    if age < 0:
+        return "нет отметки"
+    if age > 24:
+        return "задержка"
+    return "норма"
+
+
+def dns_zones(connection: dict[str, Any]) -> dict[str, Any]:
+    """Свойства зон, состав по типам записей и служебные SRV. Имена записей не сохраняются."""
+    remote = run_remote(
+        connection["host"],
+        connection["username"],
+        connection["password"],
+        connection["transport"],
+        connection["winrm_port"],
+        connection["ssh_port"],
+        _DNS_ZONE_PS,
+        timeout=150,
+    )
+    stdout = remote.get("stdout") or ""
+    if "DNS_DONE" not in stdout:
+        return {"ok": False, "zones": [], "locator": [], "wildcard": False, "message": (remote.get("error") or remote.get("stderr") or "DNS-сервер не ответил")[:180]}
+    zones = []
+    composition: dict[str, dict[str, int]] = {}
+    locator = []
+    wildcard = False
+    for line in stdout.splitlines():
+        if line.startswith("ZONE|"):
+            parts = line.split("|")
+            if len(parts) < 8:
+                continue
+            zones.append({
+                "name": parts[1],
+                "type": parts[2],
+                "scope": parts[3],
+                "dynamic": parts[4],
+                "transfer": parts[5],
+                "aging": parts[6] == "1",
+                "reverse": parts[7] == "1",
+            })
+        elif line.startswith("STAT|"):
+            parts = line.split("|", 2)
+            if len(parts) < 3:
+                continue
+            bag: dict[str, int] = {}
+            for piece in parts[2].split(","):
+                if "=" not in piece:
+                    continue
+                kind, amount = piece.split("=", 1)
+                try:
+                    bag[kind[:12]] = int(amount)
+                except ValueError:
+                    continue
+            if bag:
+                composition[parts[1][:80]] = bag
+        elif line.startswith("LOC|"):
+            parts = line.split("|")
+            if len(parts) >= 3:
+                locator.append({"name": parts[1], "ok": parts[2] == "1"})
+    return {
+        "ok": True,
+        "zones": zones,
+        "composition": composition,
+        "locator": locator,
+        "wildcard": wildcard,
+        "message": f"Зон прочитано: {len(zones)}. Состав по типам: {len(composition)}. Имена записей не копировались.",
+    }
 
 
 def gpo_conflicts(connection: dict[str, Any], names: dict[str, str]) -> dict[str, Any]:

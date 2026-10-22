@@ -1,5 +1,85 @@
 export const RELEASES = [
   {
+    version: "2.6.6",
+    ru: [
+      "У групп в каталоге видно дерево участников. У зон DNS — полоса состава по типам записей. Имена отдельных записей не копируются.",
+      "На входе и в меню стоит киберкот. Справочник остаётся одним списком проверок.",
+      "Настрой LDAP/LDAPS, установи BloodHound и приступай к сканированию!",
+    ],
+    en: [
+      "Group rows show members. DNS zones show a type composition bar. Individual record names are not copied.",
+      "The cyber cat is the mark on the login page and in the menu.",
+      "Set LDAP or LDAPS, install BloodHound, and start the scan.",
+    ],
+  },
+  {
+    version: "2.6.5",
+    ru: [
+      "Правило ToDesk больше не срабатывает на AutoDesk. В карточке сохраняется настоящее имя программы.",
+      "Справочник — один список проверок. Шестерёнка в колокольчике больше не накрывает крестик. У контроллера в таблице видны процессор, память, диск и счётчики за сутки.",
+      "Настрой LDAP/LDAPS, установи BloodHound и приступай к сканированию!",
+    ],
+    en: [
+      "The ToDesk rule no longer matches AutoDesk. The finding keeps the real program name.",
+      "The reference is one list of checks. The bell gear no longer covers the close button. Controller rows show CPU, memory, disk, and daily counters.",
+      "Set LDAP or LDAPS, install BloodHound, and start the scan.",
+    ],
+  },
+  {
+    version: "2.6.4",
+    ru: [
+      "Имя в шапке открывает профиль и безопасность. Счётчик уязвимостей из шапки убран, шестерёнка доставки осталась внутри колокольчика.",
+      "В профиле — ФИО, имя входа, почта, телефон, язык и проекты. В безопасности — смена пароля, код приложения для Яндекс Ключа или Google Authenticator и завершение других сеансов.",
+      "Настрой LDAP/LDAPS, установи BloodHound и приступай к сканированию!",
+    ],
+    en: [
+      "The header name opens profile and security. The vulnerability counter left the header, and delivery settings stay inside the bell.",
+      "Profile stores name, username, mail, phone, language, and projects. Security changes the password, adds an authenticator code, and ends other sessions.",
+      "Set LDAP or LDAPS, install BloodHound, and start the scan.",
+    ],
+  },
+  {
+    version: "2.6.3",
+    ru: [
+      "Каталог рисует схему: сайты, контроллеры и линии репликации, с фильтрами «только сбой» и «только FSMO».",
+      "Доверия показаны графом: красный узел, если фильтрация SID выключена. Расхождения политик собраны в матрицу параметр на политику.",
+      "Учётные записи разделены на политику, точечные политики, LAPS и krbtgt по уже найденным инцидентам. У контроллеров и DNS сверху полоса показателей.",
+      "Настрой LDAP/LDAPS, установи BloodHound и приступай к сканированию!",
+    ],
+    en: [
+      "The directory draws sites, domain controllers, and replication lines, with failure and FSMO filters.",
+      "Trusts are a graph: a red node means SID filtering is off. Policy conflicts are a parameter-by-policy matrix.",
+      "Accounts split into password policy, fine-grained policies, LAPS, and krbtgt from existing findings. Controllers and DNS show a KPI strip.",
+      "Set LDAP or LDAPS, install BloodHound, and start the scan.",
+    ],
+  },
+  {
+    version: "2.6.2",
+    ru: [
+      "В каталоге появилась матрица репликации: источник, партнёр, раздел и давность. Текст ошибки репликации не сохраняется.",
+      "Зоны DNS показывают тип, область, динамические обновления, передачу и очистку. Служебные SRV проверяются ответом да или нет. Список записей зоны не выгружается.",
+      "Настрой LDAP/LDAPS, установи BloodHound и приступай к сканированию!",
+    ],
+    en: [
+      "The directory shows a replication matrix with age and state. Error text is not stored.",
+      "DNS zones show type, scope, updates, transfer, and scavenging. Zone records are not exported.",
+      "Set LDAP or LDAPS, install BloodHound, and start the scan.",
+    ],
+  },
+  {
+    version: "2.6.1",
+    ru: [
+      "Схема каталога больше не уезжает в пустой экран: масштаб ограничен, есть кнопки плюс, минус и сброс, а выбранный объект открывается рядом, не поверх всего окна.",
+      "Разделы каталога стали панелями: политика паролей, группы, зоны, доверия, расхождения политик и таблица контроллеров.",
+      "Настрой LDAP/LDAPS, установи BloodHound и приступай к сканированию!",
+    ],
+    en: [
+      "The directory map stays on screen while dragging. The selected object opens beside the map.",
+      "Directory sections are panels for passwords, groups, zones, trusts, policy differences, and controllers.",
+      "Set LDAP or LDAPS, install BloodHound, and start the scan.",
+    ],
+  },
+  {
     version: "2.6.0",
     ru: [
       "У колокольчика появилась шестерёнка доставки. Почту и Telegram можно включить отдельно: итог сканирования, сбой, опасное ПО, шаблон сертификатов, пароль в политике, доверие без фильтрации SID и остальные критичные находки.",

@@ -6,7 +6,6 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { incidentsOf } from "@/lib/findings"
 import type { Theme, View } from "@/lib/types"
 import { useApp } from "@/app-state"
 import { Overview } from "@/pages/overview"
@@ -23,6 +22,7 @@ import { AssistantPage } from "@/components/assistant"
 import { FindingCard } from "@/components/finding-card"
 import { Notes } from "@/pages/notes"
 import { Catalog } from "@/pages/catalog"
+import { ProfilePage, SecurityPage } from "@/pages/profile"
 import { RELEASES } from "@/lib/releases"
 
 const NAV: { group: string; items: { id: View; icon: typeof LayoutDashboard }[] }[] = [
@@ -56,11 +56,19 @@ export function Shell() {
   const [bell, setBell] = useState(false)
   const [deliveryTick, setDeliveryTick] = useState(0)
   const [welcome, setWelcome] = useState(false)
+  const [userMenu, setUserMenu] = useState(false)
+  const userBox = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (app.me && localStorage.getItem("brosec-welcome") !== version) setWelcome(true)
   }, [app.me, version])
-  const crit = incidentsOf(app.inventory).filter((row) => row.severity === "critical").length
   const unread = app.notices.filter((row) => !row.read).length
+  useEffect(() => {
+    function close(event: MouseEvent) {
+      if (!userBox.current?.contains(event.target as Node)) setUserMenu(false)
+    }
+    document.addEventListener("mousedown", close)
+    return () => document.removeEventListener("mousedown", close)
+  }, [])
   const pages: Record<View, React.ReactNode> = {
     overview: <Overview />,
     catalog: <Catalog />,
@@ -76,6 +84,8 @@ export function Shell() {
     settings: <SettingsPage />,
     assistant: <AssistantPage />,
     notes: <Notes />,
+    profile: <ProfilePage />,
+    security: <SecurityPage />,
   }
 
   function choose(view: View) {
@@ -93,7 +103,7 @@ export function Shell() {
     <div className="flex h-full flex-col">
       <ScrollArea className="min-h-0 flex-1">
         <div className="flex items-center gap-3 px-2 pb-4">
-          <img src="/static/logo.png" alt="" className="size-10 rounded-xl object-cover" />
+          <img src="/static/logo.png" alt="" className="size-12 rounded-xl object-contain" />
           <div>
             <strong className="block text-sm">BroSec Audit AD</strong>
             <span className="text-muted-foreground text-xs">v{version}</span>
@@ -145,15 +155,9 @@ export function Shell() {
             </Select>
           ) : <span className="text-muted-foreground hidden truncate text-sm sm:block">{app.company?.name}</span>}
           <div className="ml-auto flex items-center gap-1">
-            <Button variant="outline" size="sm" onClick={() => { app.patchFilters({ sev: "critical", status: "", category: "", source: "", tactic: "" }); choose("incidents") }}>
-              {crit} {app.t("crit.badge")}
-            </Button>
             <Button variant="outline" size="icon" className="relative" onClick={() => setBell(true)} aria-label={app.t("nav.notices")}>
               <Bell />
               {unread ? <span className="absolute -top-1 -right-1 grid min-w-5 place-items-center rounded-full bg-red-500 px-1 text-[10px] text-white">{unread}</span> : null}
-            </Button>
-            <Button variant="outline" size="icon" aria-label="Доставка уведомлений" onClick={() => { setDeliveryTick((value) => value + 1); choose("notices") }}>
-              <Settings className="size-4" />
             </Button>
             <Button variant="outline" size="sm" onClick={() => choose("assistant")}><Sparkles />{app.t("nav.assistant")}</Button>
             <ThemePalette />
@@ -164,8 +168,18 @@ export function Shell() {
                 <SelectItem value="en">EN</SelectItem>
               </SelectContent>
             </Select>
-            <span className="text-muted-foreground hidden max-w-32 truncate text-sm md:block">{app.me?.full_name || app.me?.username}</span>
-            <Button variant="outline" onClick={() => void app.logout()}>{app.t("logout")}</Button>
+            <div className="relative" ref={userBox}>
+              <Button variant="outline" className="max-w-40 truncate" onClick={() => setUserMenu((value) => !value)}>
+                {app.me?.full_name || app.me?.username || "Профиль"}
+              </Button>
+              {userMenu ? (
+                <div className="bg-popover absolute right-0 z-50 mt-1 w-56 rounded-xl border p-1 shadow">
+                  <button type="button" className="hover:bg-muted w-full rounded-lg px-3 py-2 text-left text-sm" onClick={() => { setUserMenu(false); choose("profile") }}>Профиль пользователя</button>
+                  <button type="button" className="hover:bg-muted w-full rounded-lg px-3 py-2 text-left text-sm" onClick={() => { setUserMenu(false); choose("security") }}>Безопасность</button>
+                  <button type="button" className="hover:bg-muted w-full rounded-lg px-3 py-2 text-left text-sm" onClick={() => { setUserMenu(false); void app.logout() }}>{app.t("logout")}</button>
+                </div>
+              ) : null}
+            </div>
           </div>
         </header>
         <main className="p-3 pb-16 md:p-5">{pages[app.view]}</main>
@@ -189,15 +203,15 @@ export function Shell() {
       <Sheet open={bell} onOpenChange={setBell}>
         <SheetContent className="w-full sm:max-w-md">
           <SheetHeader>
-            <SheetTitle className="flex items-center gap-2">
-              {app.t("nav.notices")}{unread ? " · " + unread : ""}
-              <Button variant="outline" size="icon" className="ml-auto size-8" aria-label="Доставка" onClick={() => { setDeliveryTick((value) => value + 1); choose("notices") }}>
-                <Settings className="size-4" />
-              </Button>
-            </SheetTitle>
+            <SheetTitle className="pr-10">{app.t("nav.notices")}{unread ? " · " + unread : ""}</SheetTitle>
           </SheetHeader>
           <div className="grid gap-2 px-4">
-            <Button variant="outline" className="h-auto w-full whitespace-normal" onClick={() => void app.markAllNotices()}>{app.t("bell.read")}</Button>
+            <div className="flex gap-2">
+              <Button variant="outline" size="icon" aria-label="Доставка" onClick={() => { setDeliveryTick((value) => value + 1); choose("notices"); setBell(false) }}>
+                <Settings className="size-4" />
+              </Button>
+              <Button variant="outline" className="h-auto flex-1 whitespace-normal" onClick={() => void app.markAllNotices()}>{app.t("bell.read")}</Button>
+            </div>
             <Button className="h-auto w-full whitespace-normal" onClick={() => choose("notices")}>{app.t("bell.open")}</Button>
           </div>
           <ScrollArea className="h-[calc(100vh-9rem)] px-4">

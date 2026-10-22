@@ -14,3 +14,4 @@ pywinrm>=0.4.3
 requests-ntlm>=1.2
 paramiko>=3.5,<4
 ldap3>=2.9,<3
+qrcode>=7.4,<9
