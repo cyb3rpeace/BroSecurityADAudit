@@ -1,5 +1,31 @@
 export const RELEASES = [
   {
+    version: "2.6.12",
+    ru: [
+      "Каталог рисует дерево подразделений и домены леса. DNS отмечает устаревшие цели служебных записей контроллеров.",
+      "Известные параметры политик подписаны понятным именем. На первом контроллере выполняются пять тестов dcdiag, журнал целиком не сохраняется.",
+      "Настрой LDAP/LDAPS, установи BloodHound и приступай к сканированию!",
+    ],
+    en: [
+      "The catalog draws the OU tree and the forest domains. DNS flags locator targets that no longer match a controller.",
+      "Known policy settings use a readable name. Five dcdiag tests run on the first controller, and the full log is not stored.",
+      "Set LDAP or LDAPS, install BloodHound, and start the scan.",
+    ],
+  },
+  {
+    version: "2.6.11",
+    ru: [
+      "Письмо на почту собрано карточкой в цветах консоли: знак, полоса, счётчики критичности и таблица находок.",
+      "В каталоге у контроллера видны тома, адаптеры и BIOS. Учётные записи открывают списки из текущих инцидентов. DNS показывает пересылки без имён записей.",
+      "Настрой LDAP/LDAPS, установи BloodHound и приступай к сканированию!",
+    ],
+    en: [
+      "The mail report uses the console card: mark, color bar, severity counts, and a findings table.",
+      "Controller cards show volumes, adapters, and BIOS. Account lists come from open incidents. DNS shows forwarders without record names.",
+      "Set LDAP or LDAPS, install BloodHound, and start the scan.",
+    ],
+  },
+  {
     version: "2.6.10",
     ru: [
       "В справочнике у каждой проверки есть простое объяснение, техническое и ссылка на источник Microsoft или MITRE.",

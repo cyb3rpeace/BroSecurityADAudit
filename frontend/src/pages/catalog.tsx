@@ -17,6 +17,8 @@ type Picture = {
   subnets?: { name: string; site: string }[]
   zones?: string[]
   ous?: string[]
+  ou_nodes?: { name: string; path: string }[]
+  domains?: string[]
   groups?: { name: string; security: boolean; members?: string[]; member_count?: number }[]
   gpos?: { id?: string; name: string; state: string }[]
   trusts?: { name: string; direction: string; kind: string; sid_filter: boolean; selective: boolean }[]
@@ -34,6 +36,10 @@ type ControllerCard = {
   ram_free_pct?: string
   cpu?: string
   disk_free_pct?: string
+  bios?: string
+  volumes?: { drive: string; size_gb: string; free_pct: string }[]
+  nics?: { name: string; address: string }[]
+  diag?: { test: string; ok: boolean }[]
 }
 
 type ZoneRow = {
@@ -51,9 +57,9 @@ type WindowsView = {
   ok: boolean
   message?: string
   controllers?: ControllerCard[]
-  conflicts?: { key: string; values: { gpo: string; value: string }[] }[]
+  conflicts?: { key: string; title?: string; values: { gpo: string; value: string }[] }[]
   replication?: { source: string; partner: string; partition: string; hours: string; state: string }[]
-  dns?: { ok: boolean; message?: string; zones?: ZoneRow[]; locator?: { name: string; ok: boolean }[]; wildcard?: boolean; composition?: Record<string, Record<string, number>> }
+  dns?: { ok: boolean; message?: string; zones?: ZoneRow[]; locator?: { name: string; ok: boolean }[]; wildcard?: boolean; composition?: Record<string, Record<string, number>>; forwarders?: string[]; conditional?: { name: string; masters: string }[]; stale?: { name: string; target: string }[] }
 }
 
 type Pick = { title: string; lines: string[] }
@@ -95,6 +101,27 @@ function Meter({ label, used }: { label: string; used: number }) {
   )
 }
 
+function OuTree({ nodes, onPick }: { nodes: { name: string; path: string }[]; onPick: (item: Pick) => void }) {
+  type Node = { name: string; path: string; children: Node[] }
+  const index = new Map<string, Node>()
+  const roots: Node[] = []
+  for (const item of [...nodes].sort((left, right) => left.path.localeCompare(right.path))) {
+    const node: Node = { name: item.name, path: item.path, children: [] }
+    index.set(item.path, node)
+    const parentPath = item.path.includes("/") ? item.path.slice(0, item.path.lastIndexOf("/")) : ""
+    const parent = parentPath ? index.get(parentPath) : undefined
+    if (parent) parent.children.push(node)
+    else roots.push(node)
+  }
+  const draw = (list: Node[], depth: number) => list.map((node) => (
+    <div key={node.path}>
+      <button type="button" className="hover:bg-muted/50 block w-full border-b py-2 text-left text-sm" style={{ paddingLeft: 12 + depth * 16 }} onClick={() => onPick({ title: node.name, lines: ["Путь: " + node.path, "Пустые подразделения отмечает гигиена."] })}>{node.name}</button>
+      {draw(node.children, depth + 1)}
+    </div>
+  ))
+  return <div>{draw(roots, 0)}</div>
+}
+
 function Kpis({ items }: { items: { label: string; value: string; bad?: boolean }[] }) {
   return (
     <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
@@ -112,6 +139,7 @@ type LinkRow = { source: string; partner: string; partition: string; hours: stri
 
 function Topology({
   domain,
+  domains,
   sites,
   subnets,
   roles,
@@ -119,6 +147,7 @@ function Topology({
   onPick,
 }: {
   domain: string
+  domains: string[]
   sites: { name: string; servers: string[] }[]
   subnets: { name: string; site: string }[]
   roles: string[]
@@ -233,6 +262,11 @@ function Topology({
               <text x={node.x + 22} y={node.y + 4} fill="var(--foreground)" fontSize={12}>{node.label}</text>
             </g>
           ))}
+          <g onClick={() => { if (!moved.current) onPick({ title: "Лес", lines: domains.length ? domains : ["Имена доменов леса не прочитаны. Смотрится раздел Partitions, флаг домена в systemFlags."] }) }}>
+            <rect x={320} y={24} width={280} height={48} rx={12} fill="var(--card)" stroke="#e879f9" />
+            <text x={332} y={44} fill="var(--muted-foreground)" fontSize={11}>Лес</text>
+            <text x={332} y={62} fill="var(--foreground)" fontSize={12}>{domains.length ? domains.length + " доменов" : "домены не прочитаны"}</text>
+          </g>
           <g onClick={() => { if (!moved.current) onPick({ title: domain || "Домен", lines: ["Корень схемы.", roles.length ? "FSMO: " + roles.join(", ") : "Роли FSMO не прочитаны"] }) }}>
             <rect x={24} y={24} width={280} height={48} rx={12} fill="var(--card)" stroke="var(--border)" />
             <text x={36} y={44} fill="var(--muted-foreground)" fontSize={11}>Домен</text>
@@ -255,7 +289,7 @@ export function Catalog() {
   const [conflictsOnly, setConflictsOnly] = useState(false)
   const [groupKind, setGroupKind] = useState<"all" | "security" | "mail">("all")
   const [pick, setPick] = useState<Pick | null>(null)
-  const [acct, setAcct] = useState<"policy" | "pso" | "laps" | "krb">("policy")
+  const [acct, setAcct] = useState<"policy" | "pso" | "laps" | "krb" | "never" | "aes" | "quiet" | "os">("policy")
   const [matrix, setMatrix] = useState(true)
   const needle = query.trim().toLowerCase()
   const hit = (value: string) => !needle || value.toLowerCase().includes(needle)
@@ -285,10 +319,16 @@ export function Catalog() {
   const length = Number(picture?.policy?.length || 0)
   const lockout = picture?.policy?.lockout
   const age = picture?.policy?.max_age_days || ""
-  const openRows = (id: string) => inventory.filter((row) => row.vuln_id === id && row.status !== "closed")
-  const psoRows = openRows("weak_pso")
-  const lapsRows = inventory.filter((row) => (row.vuln_id === "laps_gap" || row.vuln_id === "laps_missing") && row.status !== "closed")
-  const krbRows = openRows("krbtgt_old")
+  const acctIds: Record<string, string[]> = {
+    pso: ["weak_pso"],
+    laps: ["laps_gap", "laps_missing"],
+    krb: ["krbtgt_old"],
+    never: ["priv_password_never_expires"],
+    aes: ["rc4_only", "des_enabled"],
+    quiet: ["inactive_stale", "stale_password"],
+    os: ["obsolete_os", "stale_computer", "machine_password_old"],
+  }
+  const acctRows = inventory.filter((row) => (acctIds[acct] || []).includes(row.vuln_id) && row.status !== "closed")
   const gpoColumns = [...new Set(conflicts.flatMap((row) => row.values.map((item) => item.gpo)))].slice(0, 8)
 
   return (
@@ -347,14 +387,14 @@ export function Catalog() {
                     <div className="grid gap-2">
                       {[
                         ["Обзор", "есть", "Число сайтов, контроллеров, политика и состав групп. Кольцевые диаграммы объектов и полосы ОС ещё не перенесены."],
-                        ["Топология", "часть", "Сайты, роли и таблица репликации. Нет масштабируемой карты леса и отдельной матрицы всех разделов."],
-                        ["Контроллеры", "часть", "Процессор, память и диск на карточке. Нет BIOS, сетевых адаптеров, томов и размера базы каталога."],
-                        ["Учётные записи", "часть", "Политика, PSO, LAPS и krbtgt из уже найденных инцидентов. Нет списков пароль-не-истекает, без AES и компьютеров по ОС."],
-                        ["Группы и OU", "часть", "Тип группы и первые участники. Нет дерева подразделений с привязанными политиками."],
-                        ["DNS", "часть", "Свойства зоны, DNSSEC, передача, очистка и доли типов. Нет условных пересылок, очистки на сервере и устаревших записей контроллеров. Имена записей не копируются."],
+                        ["Топология", "часть", "Сайты, роли, таблица репликации и имена доменов леса. Нет отдельной матрицы всех разделов."],
+                        ["Контроллеры", "часть", "Процессор, память, тома, адаптеры и версия BIOS. Нет размера базы каталога и полного списка томов сверх шести."],
+                        ["Учётные записи", "часть", "Политика и списки из открытых инцидентов: PSO, LAPS, krbtgt, пароль не истекает, без AES, давно не входили, компьютеры. Нет отдельного инвентаря gMSA."],
+                        ["Группы и OU", "часть", "Тип группы, первые участники и дерево подразделений. Привязка политик к каждому подразделению ещё не рисуется."],
+                        ["DNS", "часть", "Свойства зоны, DNSSEC, пересылки и устаревшие цели служебных записей контроллеров. Нет очистки на сервере. Здоровые имена записей не копируются."],
                         ["Доверия", "часть", "Направление и фильтрация SID. Нет проверки доступности партнёра."],
-                        ["Политики", "часть", "Сравнение GptTmpl.inf и части Registry.pol. Нет имён ADMX, WMI-фильтров и сверки с базовой линией."],
-                        ["Поза контроллера", "часть", "Подпись, время и службы из уже открытых отметок. Нет dcdiag и полного набора параметров реестра из отдельного отчёта."],
+                        ["Политики", "часть", "Сравнение GptTmpl.inf и части Registry.pol. Известные параметры подписаны понятным именем. Нет полного каталога ADMX, WMI-фильтров и базовой линии."],
+                        ["Поза контроллера", "часть", "Подпись, время, службы и пять тестов dcdiag на первом контроллере. Полный журнал dcdiag не сохраняется."],
                       ].map(([title, state, note]) => (
                         <div key={title} className="grid gap-1 border-t pt-2 first:border-t-0 first:pt-0 sm:grid-cols-[140px_72px_1fr] sm:items-start">
                           <div className="text-sm font-medium">{title}</div>
@@ -368,7 +408,7 @@ export function Catalog() {
               ) : null}
               {tab === "topology" ? (
                 <div className="grid gap-3">
-                  <Topology domain={picture.domain || ""} sites={picture.sites || []} subnets={picture.subnets || []} roles={picture.roles || []} links={windows?.replication || []} onPick={setPick} />
+                  <Topology domain={picture.domain || ""} domains={picture.domains || []} sites={picture.sites || []} subnets={picture.subnets || []} roles={picture.roles || []} links={windows?.replication || []} onPick={setPick} />
                   <div className="overflow-auto rounded-xl border">
                     <div className="border-b px-3 py-2 text-sm font-medium">Репликация · {(windows?.replication || []).length}</div>
                     <table className="w-full min-w-[640px] text-left text-sm">
@@ -395,9 +435,17 @@ export function Catalog() {
                 <div className="grid gap-3">
                   <div className="flex flex-wrap gap-2">
                     <Button size="sm" variant={acct === "policy" ? "default" : "outline"} onClick={() => setAcct("policy")}>Политика</Button>
-                    <Button size="sm" variant={acct === "pso" ? "default" : "outline"} onClick={() => setAcct("pso")}>Точечные · {psoRows.length}</Button>
-                    <Button size="sm" variant={acct === "laps" ? "default" : "outline"} onClick={() => setAcct("laps")}>LAPS · {lapsRows.length}</Button>
-                    <Button size="sm" variant={acct === "krb" ? "default" : "outline"} onClick={() => setAcct("krb")}>krbtgt · {krbRows.length}</Button>
+                    {([
+                      ["pso", "Точечные"],
+                      ["laps", "LAPS"],
+                      ["krb", "krbtgt"],
+                      ["never", "Пароль не истекает"],
+                      ["aes", "Без AES"],
+                      ["quiet", "Давно не входили"],
+                      ["os", "Компьютеры"],
+                    ] as const).map(([id, label]) => (
+                      <Button key={id} size="sm" variant={acct === id ? "default" : "outline"} onClick={() => setAcct(id)}>{label} · {inventory.filter((row) => acctIds[id].includes(row.vuln_id) && row.status !== "closed").length}</Button>
+                    ))}
                   </div>
                   {acct === "policy" ? (
                     <div className="grid gap-3 sm:grid-cols-2">
@@ -416,13 +464,14 @@ export function Catalog() {
                     </div>
                   ) : (
                     <div className="grid gap-2">
-                      {(acct === "pso" ? psoRows : acct === "laps" ? lapsRows : krbRows).map((row) => (
+                      {acctRows.slice(0, 24).map((row) => (
                         <button key={row.id} type="button" className="hover:bg-muted/40 rounded-xl border px-3 py-2 text-left text-sm" onClick={() => setPick({ title: row.title, lines: [row.hostname, row.detail || "Подробности в инциденте"] })}>
                           <div className="font-medium">{row.title}</div>
                           <div className="text-muted-foreground text-xs">{row.hostname}</div>
                         </button>
                       ))}
-                      {!(acct === "pso" ? psoRows : acct === "laps" ? lapsRows : krbRows).length ? <p className="text-muted-foreground text-sm">В текущих инцидентах таких отметок нет. Они появляются после сканирования гигиены.</p> : null}
+                      {acctRows.length > 24 ? <p className="text-muted-foreground text-xs">ещё {acctRows.length - 24}. Полный список остаётся в инцидентах.</p> : null}
+                      {!acctRows.length ? <p className="text-muted-foreground text-sm">В текущих инцидентах таких отметок нет. Они появляются после сканирования гигиены.</p> : null}
                     </div>
                   )}
                 </div>
@@ -454,8 +503,8 @@ export function Catalog() {
                     {!groups.length ? <p className="text-muted-foreground p-3 text-sm">Групп по фильтру нет.</p> : null}
                   </div>
                   <div className="overflow-hidden rounded-xl border">
-                    <div className="border-b px-3 py-2 text-sm font-medium">Подразделения · {ous.length}</div>
-                    {ous.map((name) => (
+                    <div className="border-b px-3 py-2 text-sm font-medium">Подразделения · {(picture.ou_nodes || []).length || ous.length}</div>
+                    {(picture.ou_nodes || []).length ? <OuTree nodes={picture.ou_nodes || []} onPick={setPick} /> : ous.map((name) => (
                       <button key={name} type="button" className="hover:bg-muted/50 block w-full border-b px-3 py-2 text-left text-sm last:border-b-0" onClick={() => setPick({ title: name, lines: ["Подразделение. Пустые подразделения отмечает гигиена."] })}>{name}</button>
                     ))}
                   </div>
@@ -495,6 +544,32 @@ export function Catalog() {
                       <p className="text-muted-foreground text-xs">Имена отдельных записей не копируются. Полоса показывает долю типов.</p>
                     </div>
                   ) : null}
+                  <div className="grid gap-2 rounded-xl border p-3">
+                    <div className="text-sm font-medium">Пересылки</div>
+                    <div className="flex flex-wrap gap-2">
+                      {(windows?.dns?.forwarders || []).map((address) => <span key={address} className="bg-muted rounded-full px-2 py-1 text-xs">{address}</span>)}
+                      {windows?.dns && !(windows.dns.forwarders || []).length ? <span className="text-muted-foreground text-xs">Серверных пересылок нет: внешние имена идут через корневые ссылки, если рекурсия включена.</span> : null}
+                      {!windows?.dns ? <span className="text-muted-foreground text-xs">Пересылки ещё читаются.</span> : null}
+                    </div>
+                    {(windows?.dns?.conditional || []).length ? (
+                      <div className="grid gap-1">
+                        {windows?.dns?.conditional?.map((row) => (
+                          <button key={row.name} type="button" className="hover:bg-muted/40 rounded-lg px-2 py-1 text-left text-xs" onClick={() => setPick({ title: row.name, lines: ["Условная пересылка", "Серверы: " + (row.masters || "не прочитаны"), "Имена записей этой зоны не копируются."] })}>
+                            <span className="font-medium">{row.name}</span>
+                            <span className="text-muted-foreground"> · {row.masters || "серверы не прочитаны"}</span>
+                          </button>
+                        ))}
+                      </div>
+                    ) : windows?.dns ? <p className="text-muted-foreground text-xs">Условных пересылок нет.</p> : null}
+                  </div>
+                  <div className="grid gap-2 rounded-xl border p-3">
+                    <div className="text-sm font-medium">Устаревшие цели контроллеров</div>
+                    {(windows?.dns?.stale || []).length ? windows?.dns?.stale?.map((row) => (
+                      <button key={row.name + row.target} type="button" className="hover:bg-muted/40 rounded-lg px-2 py-1 text-left text-xs" onClick={() => setPick({ title: row.target, lines: ["Служебная запись " + row.name + " указывает на имя, которого нет среди текущих контроллеров.", "Остальные записи зоны не копируются."] })}>
+                        {row.name} · {row.target}
+                      </button>
+                    )) : <p className="text-muted-foreground text-xs">{windows?.dns ? "Расхождений со списком контроллеров нет." : "Проверка ещё читается."}</p>}
+                  </div>
                   {windows?.dns?.zones?.length ? (
                     <div className="overflow-auto rounded-xl border">
                       <table className="w-full min-w-[760px] text-left text-sm">
@@ -579,8 +654,8 @@ export function Catalog() {
                         </thead>
                         <tbody>
                           {conflicts.map((row) => (
-                            <tr key={row.key} className="hover:bg-muted/40 cursor-pointer border-t" onClick={() => setPick({ title: row.key, lines: row.values.map((item) => item.gpo + ": " + item.value) })}>
-                              <td className="px-3 py-2">{row.key}</td>
+                            <tr key={row.key} className="hover:bg-muted/40 cursor-pointer border-t" onClick={() => setPick({ title: row.title || row.key, lines: [row.key, ...row.values.map((item) => item.gpo + ": " + item.value)] })}>
+                              <td className="px-3 py-2">{row.title || row.key}</td>
                               {gpoColumns.map((name) => <td key={name} className="px-3 py-2">{row.values.find((item) => item.gpo === name)?.value || "—"}</td>)}
                             </tr>
                           ))}
@@ -588,8 +663,8 @@ export function Catalog() {
                       </table>
                     </div>
                   ) : conflictsOnly ? conflicts.map((row) => (
-                    <button key={row.key} type="button" className="hover:bg-muted/40 rounded-xl border p-3 text-left text-sm" onClick={() => setPick({ title: row.key, lines: row.values.map((item) => item.gpo + ": " + item.value) })}>
-                      <div className="font-medium">{row.key}</div>
+                    <button key={row.key} type="button" className="hover:bg-muted/40 rounded-xl border p-3 text-left text-sm" onClick={() => setPick({ title: row.title || row.key, lines: [row.key, ...row.values.map((item) => item.gpo + ": " + item.value)] })}>
+                      <div className="font-medium">{row.title || row.key}</div>
                       {row.values.map((item) => <div key={item.gpo} className="text-muted-foreground">{item.gpo}: {item.value}</div>)}
                     </button>
                   )) : (
@@ -619,14 +694,20 @@ export function Catalog() {
                       const ramFree = Number(extra?.ram_free_pct)
                       const diskFree = Number(extra?.disk_free_pct)
                       return (
-                        <button key={row.name} type="button" className="hover:bg-muted/40 rounded-xl border p-3 text-left" onClick={() => setPick({ title: row.name, lines: [row.host || "имя узла не прочитано", row.os || "ОС не прочитана", extra?.maker ? extra.maker + " " + (extra.model || "") : "Модель ещё читается", extra?.cpu || "Процессор не прочитан", extra?.ram_gb ? "Память " + extra.ram_gb + " ГБ" : "Память ещё читается", "Текст событий не читается"] })}>
+                        <button key={row.name} type="button" className="hover:bg-muted/40 rounded-xl border p-3 text-left" onClick={() => setPick({ title: row.name, lines: [row.host || "имя узла не прочитано", row.os || "ОС не прочитана", extra?.maker ? extra.maker + " " + (extra.model || "") : "Модель ещё читается", extra?.bios ? "BIOS " + extra.bios : "BIOS ещё читается", extra?.cpu || "Процессор не прочитан", ...(extra?.volumes || []).map((item) => item.drive + " " + item.size_gb + " ГБ, свободно " + item.free_pct + "%"), ...(extra?.nics || []).map((item) => item.name + (item.address ? " · " + item.address : "")), "Текст событий не читается"] })}>
                           <div className="font-medium">{row.name}</div>
-                          <div className="text-muted-foreground mt-1 text-xs">{row.os || "ОС не прочитана"}</div>
+                          <div className="text-muted-foreground mt-1 text-xs">{row.os || "ОС не прочитана"}{extra?.bios ? " · BIOS " + extra.bios : ""}</div>
                           <div className="mt-2 text-xs">{extra?.cpu || "Процессор ещё читается"}</div>
                           <div className="mt-3 grid gap-2">
                             {extra?.ram_gb ? <Meter label={"Память занята, всего " + extra.ram_gb + " ГБ"} used={Number.isFinite(ramFree) ? 100 - ramFree : 0} /> : <p className="text-muted-foreground text-xs">Память ещё читается.</p>}
-                            {extra?.disk_free_pct ? <Meter label="Диск занят" used={Number.isFinite(diskFree) ? 100 - diskFree : 0} /> : <p className="text-muted-foreground text-xs">Диск ещё читается.</p>}
+                            {(extra?.volumes || []).length ? extra?.volumes?.map((item) => <Meter key={item.drive} label={item.drive + " занят, " + item.size_gb + " ГБ"} used={100 - Number(item.free_pct || 0)} />) : extra?.disk_free_pct ? <Meter label="Диск занят" used={Number.isFinite(diskFree) ? 100 - diskFree : 0} /> : <p className="text-muted-foreground text-xs">Тома ещё читаются.</p>}
                           </div>
+                          {(extra?.nics || []).length ? <div className="text-muted-foreground mt-2 text-xs">{extra?.nics?.map((item) => item.name + (item.address ? " · " + item.address : "")).join("; ")}</div> : null}
+                          {(extra?.diag || []).length ? (
+                            <div className="mt-2 flex flex-wrap gap-1">
+                              {extra?.diag?.map((item) => <span key={item.test} className={"rounded-full px-2 py-0.5 text-[11px] " + (item.ok ? "bg-emerald-500/15" : "bg-red-500/15")}>{item.test}</span>)}
+                            </div>
+                          ) : null}
                         </button>
                       )
                     })}

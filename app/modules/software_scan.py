@@ -591,6 +591,35 @@ try {
   $model = (([string]$cs.Model) -replace '\|','/')
   $cpuName = (([string]$cpu.Name) -replace '\|','/')
   Write-Output ('HW|' + $maker + '|' + $model + '|' + $ram + '|' + $freeRam + '|' + $cpuName + '|' + $freeDisk)
+  $volSent = 0
+  foreach ($v in @(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' -ErrorAction SilentlyContinue)) {
+    if ($volSent -ge 6) { break }
+    $size = 0
+    $free = 0
+    if ($v.Size -gt 0) {
+      $size = [math]::Round($v.Size / 1GB, 1)
+      $free = [math]::Round(100 * $v.FreeSpace / $v.Size)
+    }
+    $drive = (([string]$v.DeviceID) -replace '\|','/')
+    if ($drive) { Write-Output ('VOL|' + $drive + '|' + $size + '|' + $free); $volSent++ }
+  }
+  $nicSent = 0
+  foreach ($n in @(Get-CimInstance Win32_NetworkAdapterConfiguration -Filter 'IPEnabled=True' -ErrorAction SilentlyContinue)) {
+    if ($nicSent -ge 4) { break }
+    $desc = (([string]$n.Description) -replace '\|','/')
+    if ($desc.Length -gt 60) { $desc = $desc.Substring(0, 60) }
+    $ip = ''
+    if ($n.IPAddress) { $ip = [string](@($n.IPAddress) | Where-Object { $_ -notmatch ':' } | Select-Object -First 1) }
+    $ip = ($ip -replace '\|','/')
+    Write-Output ('NIC|' + $desc + '|' + $ip)
+    $nicSent++
+  }
+  try {
+    $bios = Get-CimInstance Win32_BIOS -ErrorAction Stop
+    $biosVer = (([string]$bios.SMBIOSBIOSVersion) -replace '\|','/')
+    if ($biosVer.Length -gt 40) { $biosVer = $biosVer.Substring(0, 40) }
+    if ($biosVer) { Write-Output ('BIOS|' + $biosVer) }
+  } catch {}
 } catch { Write-Output 'HW_FAIL' }
 Write-Output ('COUNT|' + (Count-Id 4625) + '|' + (Count-Id 4740))
 try {
@@ -623,6 +652,18 @@ try {
 Write-Output 'DC_DONE'
 """
 
+_DIAG_PS = r"""
+$ErrorActionPreference = 'Continue'
+$exe = Join-Path $env:windir 'System32\dcdiag.exe'
+if (-not (Test-Path -LiteralPath $exe)) { Write-Output 'DIAG_FAIL'; Write-Output 'DIAG_DONE'; exit }
+foreach ($test in @('Advertising','Replications','NetLogons','Services','FSMOCheck')) {
+  $out = & $exe /test:$test /q 2>&1 | Out-String
+  $bad = ($LASTEXITCODE -ne 0) -or ($out -match '(?i)failed')
+  Write-Output ('DIAG|' + $test + '|' + $(if ($bad) { '0' } else { '1' }))
+}
+Write-Output 'DIAG_DONE'
+"""
+
 _DNS_ZONE_PS = r"""
 $ErrorActionPreference = 'Continue'
 try { Import-Module DnsServer -ErrorAction Stop } catch { Write-Output 'DNS_FAIL'; Write-Output 'DNS_DONE'; exit }
@@ -644,7 +685,17 @@ foreach ($z in $zones) {
   $signed = '0'
   try { if ($z.IsSigned) { $signed = '1' } } catch {}
   Write-Output ('ZONE|' + $name + '|' + $type + '|' + $scope + '|' + $dyn + '|' + $xfer + '|' + $aging + '|' + $rev + '|' + $signed)
+  if ($z.ZoneType -eq 'Forwarder') {
+    $masters = @()
+    try { $masters = @($z.MasterServers | Select-Object -First 4 | ForEach-Object { ([string]$_) -replace '\|','/' }) } catch {}
+    Write-Output ('CFWD|' + $name + '|' + ($masters -join ','))
+  }
 }
+try {
+  $fw = Get-DnsServerForwarder -ErrorAction SilentlyContinue
+  $ips = @($fw.IPAddress | Select-Object -First 8 | ForEach-Object { ([string]$_) -replace '\|','/' })
+  Write-Output ('FWD|' + ($ips -join ','))
+} catch { Write-Output 'FWD|' }
 $counted = 0
 foreach ($z in $zones) {
   if ($counted -ge 4) { break }
@@ -674,6 +725,45 @@ try {
       if ($ans.Count -gt 0) { $ok = '1' }
     } catch {}
     Write-Output ('LOC|' + $label + '|' + $ok)
+  }
+  $live = New-Object 'System.Collections.Generic.HashSet[string]'
+  foreach ($dc in @(Get-ADDomainController -Filter * -Server $env:COMPUTERNAME -ErrorAction SilentlyContinue)) {
+    foreach ($value in @([string]$dc.HostName, [string]$dc.Name)) {
+      if ($value) { [void]$live.Add($value.ToLower()) }
+    }
+  }
+  $stale = 0
+  function Test-Gone([string]$target) {
+    $name = $target.Trim().Trim('.').ToLower()
+    if (-not $name) { return $false }
+    if ($live.Contains($name)) { return $false }
+    $short = $name.Split('.')[0]
+    foreach ($item in $live) { if ($item.Split('.')[0] -eq $short) { return $false } }
+    return $true
+  }
+  foreach ($label in @('_ldap._tcp','_kerberos._tcp','_gc._tcp')) {
+    if ($stale -ge 12) { break }
+    foreach ($rec in @(Get-DnsServerResourceRecord -ZoneName $domain -RRType SRV -Name $label -ErrorAction SilentlyContinue)) {
+      if ($stale -ge 12) { break }
+      $target = ''
+      try { $target = [string]$rec.RecordData.DomainName } catch {}
+      if (Test-Gone $target) {
+        Write-Output ('STALE|' + $label + '|' + (($target -replace '\|','/')))
+        $stale++
+      }
+    }
+  }
+  $msdcs = '_msdcs.' + $domain
+  $seenCname = 0
+  foreach ($rec in @(Get-DnsServerResourceRecord -ZoneName $msdcs -RRType CNAME -ErrorAction SilentlyContinue)) {
+    if ($stale -ge 12 -or $seenCname -ge 40) { break }
+    $seenCname++
+    $target = ''
+    try { $target = [string]$rec.RecordData.HostNameAlias } catch {}
+    if (Test-Gone $target) {
+      Write-Output ('STALE|cname|' + (($target -replace '\|','/')))
+      $stale++
+    }
   }
 } catch { Write-Output 'LOC_FAIL' }
 Write-Output 'DNS_DONE'
@@ -799,7 +889,7 @@ def last_interactive_user(connection: dict[str, Any], host: str) -> str:
 def controller_extra(connection: dict[str, Any], hosts: list[str]) -> list[dict[str, Any]]:
     """Железо и счётчики входов по контроллерам. Сообщения журнала не сохраняются."""
     rows = []
-    for host in hosts[:6]:
+    for index, host in enumerate(hosts[:6]):
         try:
             checked = validate_host(host)
         except ValueError:
@@ -836,6 +926,16 @@ def controller_extra(connection: dict[str, Any], hosts: list[str]) -> list[dict[
                         "cpu": parts[5],
                         "disk_free_pct": parts[6],
                     })
+            elif line.startswith("VOL|"):
+                parts = line.split("|")
+                if len(parts) >= 4 and len(item.setdefault("volumes", [])) < 6:
+                    item["volumes"].append({"drive": parts[1][:8], "size_gb": parts[2][:8], "free_pct": parts[3][:4]})
+            elif line.startswith("NIC|"):
+                parts = line.split("|")
+                if len(parts) >= 3 and len(item.setdefault("nics", [])) < 4:
+                    item["nics"].append({"name": parts[1][:60], "address": parts[2][:48]})
+            elif line.startswith("BIOS|"):
+                item["bios"] = line.split("|", 1)[1][:40]
             elif line.startswith("REPL|"):
                 parts = line.split("|")
                 if len(parts) >= 6:
@@ -851,6 +951,23 @@ def controller_extra(connection: dict[str, Any], hosts: list[str]) -> list[dict[
                 item["repl_ok"] = False
         if "repl_ok" not in item:
             item["repl_ok"] = "partners" in item or "REPL_FAIL" not in (remote.get("stdout") or "")
+        if index == 0:
+            diag = run_remote(
+                checked,
+                connection["username"],
+                connection["password"],
+                connection["transport"],
+                connection["winrm_port"],
+                connection["ssh_port"],
+                _DIAG_PS,
+                timeout=40,
+            )
+            for line in (diag.get("stdout") or "").splitlines():
+                if not line.startswith("DIAG|"):
+                    continue
+                parts = line.split("|")
+                if len(parts) >= 3 and len(item.setdefault("diag", [])) < 8:
+                    item["diag"].append({"test": parts[1][:32], "ok": parts[2] == "1"})
         rows.append(item)
     return rows
 
@@ -881,7 +998,7 @@ def dns_zones(connection: dict[str, Any]) -> dict[str, Any]:
         connection["winrm_port"],
         connection["ssh_port"],
         _DNS_ZONE_PS,
-        timeout=90,
+        timeout=110,
     )
     stdout = remote.get("stdout") or ""
     if "DNS_DONE" not in stdout:
@@ -889,6 +1006,9 @@ def dns_zones(connection: dict[str, Any]) -> dict[str, Any]:
     zones = []
     composition: dict[str, dict[str, int]] = {}
     locator = []
+    forwarders: list[str] = []
+    conditional: list[dict[str, str]] = []
+    stale: list[dict[str, str]] = []
     wildcard = False
     for line in stdout.splitlines():
         if line.startswith("ZONE|"):
@@ -924,14 +1044,60 @@ def dns_zones(connection: dict[str, Any]) -> dict[str, Any]:
             parts = line.split("|")
             if len(parts) >= 3:
                 locator.append({"name": parts[1], "ok": parts[2] == "1"})
+        elif line.startswith("FWD|"):
+            forwarders = [piece.strip()[:48] for piece in line.split("|", 1)[1].split(",") if piece.strip()][:8]
+        elif line.startswith("CFWD|") and len(conditional) < 12:
+            parts = line.split("|", 2)
+            if len(parts) >= 2 and parts[1]:
+                conditional.append({"name": parts[1][:80], "masters": (parts[2] if len(parts) > 2 else "")[:120]})
+        elif line.startswith("STALE|") and len(stale) < 12:
+            parts = line.split("|", 2)
+            if len(parts) >= 3 and parts[2]:
+                stale.append({"name": parts[1][:40], "target": parts[2][:80]})
     return {
         "ok": True,
         "zones": zones,
         "composition": composition,
         "locator": locator,
+        "forwarders": forwarders,
+        "conditional": conditional,
+        "stale": stale,
         "wildcard": wildcard,
         "message": f"Зон прочитано: {len(zones)}. Состав по типам: {len(composition)}. Имена записей не копировались.",
     }
+
+
+_FRIENDLY = {
+    "LmCompatibilityLevel": "Уровень проверки подлинности LAN Manager",
+    "NoLMHash": "Не хранить хеш LM",
+    "LDAPServerIntegrity": "Подпись LDAP на контроллере",
+    "LDAPClientIntegrity": "Подпись LDAP на клиенте",
+    "RequireSecuritySignature": "Обязательная подпись SMB",
+    "EnableSecuritySignature": "Подпись SMB включена",
+    "RestrictAnonymous": "Дополнительные ограничения анонимного доступа",
+    "RestrictAnonymousSAM": "Анонимное перечисление SAM",
+    "EveryoneIncludesAnonymous": "Everyone включает анонимный доступ",
+    "SupportedEncryptionTypes": "Типы шифрования Kerberos",
+    "MaxClockSkew": "Максимальная погрешность часов Kerberos",
+    "MinimumPasswordLength": "Минимальная длина пароля",
+    "PasswordHistorySize": "История паролей",
+    "LockoutBadCount": "Порог блокировки",
+    "MaximumPasswordAge": "Максимальный срок пароля",
+    "ClearTextPassword": "Обратимое шифрование пароля",
+    "LsaCfgFlags": "Защита учётных данных LSA",
+    "RunAsPPL": "LSA как защищённый процесс",
+    "EnableLUA": "Контроль учётных записей",
+    "ConsentPromptBehaviorAdmin": "Поведение запроса UAC для администратора",
+    "EnableMulticast": "Мультикаст имён LLMNR",
+    "AllowInsecureGuestAuth": "Гостевой вход SMB",
+    "RequireMutualAuthentication": "Взаимная проверка UNC",
+    "RequireIntegrity": "Целостность UNC",
+}
+
+
+def _friendly(key: str) -> str:
+    tail = key.replace("/", "\\").split("\\")[-1]
+    return _FRIENDLY.get(tail) or _FRIENDLY.get(key) or ""
 
 
 def gpo_conflicts(connection: dict[str, Any], names: dict[str, str]) -> dict[str, Any]:
@@ -965,10 +1131,14 @@ def gpo_conflicts(connection: dict[str, Any], names: dict[str, str]) -> dict[str
     for key, by_gpo in bucket.items():
         if len(by_gpo) < 2 or len(set(by_gpo.values())) < 2:
             continue
-        conflicts.append({
+        row = {
             "key": key,
             "values": [{"gpo": name, "value": val} for name, val in list(by_gpo.items())[:6]],
-        })
+        }
+        title = _friendly(key)
+        if title:
+            row["title"] = title
+        conflicts.append(row)
         if len(conflicts) >= 30:
             break
     return {

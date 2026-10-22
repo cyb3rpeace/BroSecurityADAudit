@@ -75,7 +75,7 @@ try:
 except Exception:
     TZ = ZoneInfo("UTC")
 
-PRODUCT_VERSION = "2.6.10"
+PRODUCT_VERSION = "2.6.12"
 
 ALLOWED_MODULES = (
     "bloodhound",

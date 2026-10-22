@@ -934,7 +934,28 @@ def directory_picture(connection: dict[str, Any]) -> dict[str, Any]:
             if _safe_search(conn, suffix, "(&(objectClass=dnsNode)(dc=\\2a))", ["dc"], 1):
                 wildcard = True
                 break
-        ous = [str(_first(entry, "ou") or "") for entry in _safe_search(conn, base, "(objectClass=organizationalUnit)", ["ou"], 40)]
+        ous = []
+        ou_nodes = []
+        for entry in _safe_search(conn, base, "(objectClass=organizationalUnit)", ["ou", "distinguishedName"], 80):
+            dn = str(_first(entry, "distinguishedName") or "")
+            chain = [part[3:] for part in dn.split(",") if part.upper().startswith("OU=")]
+            name = chain[0] if chain else str(_first(entry, "ou") or "")
+            if not name:
+                continue
+            ous.append(name)
+            ou_nodes.append({"name": name[:80], "path": "/".join(reversed(chain))[:220]})
+        domains = []
+        if config:
+            for entry in _safe_search(conn, f"CN=Partitions,{config}", "(objectClass=crossRef)", ["dnsRoot", "systemFlags"], 24):
+                try:
+                    flags = int(_first(entry, "systemFlags") or 0)
+                except (TypeError, ValueError):
+                    flags = 0
+                if not flags & 2:
+                    continue
+                dns = str(_first(entry, "dnsRoot") or "")
+                if dns and dns not in domains and len(domains) < 12:
+                    domains.append(dns)
         groups = []
         for entry in _safe_search(conn, base, "(objectCategory=group)", ["cn", "groupType", "member"], 40):
             try:
@@ -996,6 +1017,8 @@ def directory_picture(connection: dict[str, Any]) -> dict[str, Any]:
             "zones": zones,
             "wildcard": wildcard,
             "ous": [name for name in ous if name],
+            "ou_nodes": ou_nodes,
+            "domains": domains,
             "groups": groups,
             "gpos": gpos,
             "trusts": trusts,
