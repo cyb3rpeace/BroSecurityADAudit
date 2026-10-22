@@ -50,10 +50,6 @@ const ACL: SourceLink = {
   title: "Microsoft Learn: права на объекты каталога",
   href: "https://learn.microsoft.com/windows-server/identity/ad-ds/manage/understand-security-groups",
 }
-const BLOOD: SourceLink = {
-  title: "SpecterOps: SharpHound Community Edition",
-  href: "https://support.bloodhoundenterprise.io/hc/en-us/articles/17468450058267-SharpHound-Community-Edition",
-}
 const MITRE_REMOTE: SourceLink = {
   title: "MITRE T1219: удалённый доступ",
   href: "https://attack.mitre.org/techniques/T1219/",
@@ -146,7 +142,6 @@ const BY_FAMILY: { test: RegExp; tech: string; links: SourceLink[] }[] = [
   { test: /ldap|каталог|аноним/i, tech: "Канал — LDAP 389 или LDAPS 636. Подпись и привязка канала задаются отдельно от порта. Анонимная привязка и Pre-Windows 2000 Compatible Access расширяют чтение каталога.", links: [LDAP] },
   { test: /время|час/i, tech: "Сверяется w32tm на контроллерах. Допуск Kerberos по умолчанию 5 минут. Исправление — синхронизация с источником, а не увеличение MaxClockSkew.", links: [TIME] },
   { test: /аудит|журнал/i, tech: "Категории расширенного аудита читаются через auditpol. Для разбора изменений каталога нужна подкатегория Directory Service Changes с Success.", links: [AUDIT] },
-  { test: /bloodhound|sharp|граф|метод/i, tech: "Сбор SharpHound: DCOnly, Session, LocalAdmin, CA. Методы All и захват хешей не используются. Граф показывает рёбра членства и ACL, платформа по нему команды не исполняет.", links: [BLOOD] },
   { test: /удаленн|rat|anydesk|teamviewer/i, tech: "Совпадение по имени в списке установленных программ, с границей слова, чтобы ToDesk не срабатывал на AutoDesk. Файл не запускается и не выгружается.", links: [MITRE_REMOTE] },
 ]
 

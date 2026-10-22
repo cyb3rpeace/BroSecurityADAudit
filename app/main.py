@@ -55,7 +55,6 @@ from app.database import (
     verify_password,
 )
 from app.modules.account_auth import device_label, new_secret, otpauth_uri, qr_svg, totp_ok
-from app.modules.bloodhound import ingest_sharphound_zip, run_bloodhound
 from app.modules.dc_hardening import scan_hardening
 from app.modules.ldap_audit import directory_picture, list_computer_names, lookup_asset, probe_directory, scan_adcs_ldap, scan_hardening_ldap, scan_hygiene_ldap, scan_trusts_ldap
 from app.modules.mitre import card as mitre_card
@@ -75,10 +74,9 @@ try:
 except Exception:
     TZ = ZoneInfo("UTC")
 
-PRODUCT_VERSION = "2.6.13"
+PRODUCT_VERSION = "2.6.16"
 
 ALLOWED_MODULES = (
-    "bloodhound",
     "ad_cs",
     "software_audit",
     "gpp_passwords",
@@ -89,7 +87,6 @@ ALLOWED_MODULES = (
     "protocols",
 )
 MODULE_TITLES = {
-    "bloodhound": "BloodHound CE",
     "ad_cs": "AD CS",
     "software_audit": "Аудит ПО",
     "gpp_passwords": "Пароли в GPO",
@@ -909,7 +906,6 @@ _MODULE_SHORT = {
     "time_sync": "Время",
     "baseline_hygiene": "Гигиена",
     "protocols": "Протоколы",
-    "bloodhound": "SharpHound",
 }
 
 
@@ -966,7 +962,7 @@ def execute_scan(scan_id: int) -> None:
         company = db.get(Company, scan.company_id)
         scan.status = "running"
         db.commit()
-        modules = [item for item in (scan.module or "").split(",") if item]
+        modules = [item for item in (scan.module or "").split(",") if item in ALLOWED_MODULES]
         host = scan.target_dc or company.dc_host
         connection = connection_from(company, host) if host else None
         if connection:
@@ -1010,13 +1006,6 @@ def execute_scan(scan_id: int) -> None:
                         "score": None,
                         "message": "Не заданы учетные данные. Для каталога достаточно служебной учетной записи домена с правом чтения.",
                     }
-                elif module == "bloodhound":
-                    if win_connection:
-                        result = run_bloodhound(windows_connection(win_connection))
-                    else:
-                        result = run_bloodhound(None)
-                        note = "SharpHound удаленно не запускался. Запустите его вручную на компьютере, где уже выполнен вход в домен, и загрузите zip на странице SharpHound. Граф читается, если сбор уже загружали."
-                        result["message"] = (note + " " + (result.get("message") or "")).strip()
                 elif module == "protocols":
                     findings: list[dict[str, Any]] = []
                     bits: list[str] = []
@@ -1038,7 +1027,7 @@ def execute_scan(scan_id: int) -> None:
                     result = scan_hardening_ldap(connection)
                 elif module == "software_audit" and not win_connection:
                     result = windows_required(module)
-                elif module not in {"software_audit", "dc_hardening"} and not dc_windows and module not in {"trusts", "baseline_hygiene", "bloodhound", "protocols"}:
+                elif module not in {"software_audit", "dc_hardening"} and not dc_windows and module not in {"trusts", "baseline_hygiene", "protocols"}:
                     result = windows_required(module)
                 else:
                     remote_tools = windows_connection(win_connection) if win_connection else None
@@ -1125,39 +1114,13 @@ def execute_scan(scan_id: int) -> None:
             f"BroSec Audit AD\nКомпания: {company.name}\nКонтроллер: {host}\n"
             f"Индекс риска: {score}\nСтатус: {scan.status}\n\n{scan.summary}"
         )
-        channel = channel_row(db)
-        chat = (company.telegram_chat or channel.telegram_chat or "").strip()
-        prefs = read_notify_prefs(channel)
-        status_key = "scan_failed" if scan.status == "failed" else "scan_done"
-        mail_text = alert_body(prefs, "mail", status_key, text, collected)
-        tg_text = alert_body(prefs, "telegram", status_key, text, collected)
-        telegram = (
-            send_summary(tg_text, str(pdf_path) if pdf_path else None, channel.telegram_token, chat, channel.telegram_proxy)
-            if tg_text else {"ok": True}
-        )
-        mail = (
-            send_report(
-                company.name,
-                mail_text,
-                collected if prefs.get("critical", {}).get("mail") or prefs.get("software_danger", {}).get("mail") else [],
-                str(pdf_path) if pdf_path else None,
-                company.notify_email,
-                mail_channel(channel),
-            )
-            if mail_text else {"ok": True}
-        )
-        extra = []
-        if not telegram.get("ok"):
-            extra.append(str(telegram.get("error")))
-        if not mail.get("ok"):
-            extra.append(str(mail.get("error")))
-        for secret in (channel.smtp_password or "", channel.telegram_token or ""):
-            if secret:
-                extra = [line.replace(secret, "***") for line in extra]
-        if extra:
-            scan.summary = (scan.summary + "\n" + "\n".join(extra))[:8000]
         try:
+            extra = dispatch_notifications(db, company, scan, text, collected, str(pdf_path) if pdf_path else None)
+            if extra:
+                scan.summary = (scan.summary + "\n" + "\n".join(extra))[:8000]
             publish_scan_notice(db, scan, company)
+            if extra:
+                publish_notice(db, company.id, "Почта или Telegram не доставили сообщение", "\n".join(extra)[:900], "error")
             db.commit()
         except Exception:
             log.exception("notice")
@@ -1170,7 +1133,11 @@ def execute_scan(scan_id: int) -> None:
         try:
             failed_company = db.get(Company, scan.company_id)
             if failed_company is not None:
+                reason = scan.summary or "Проверка прервана."
+                extra = dispatch_notifications(db, failed_company, scan, reason, [], None)
                 publish_scan_notice(db, scan, failed_company)
+                if extra:
+                    publish_notice(db, failed_company.id, "Почта или Telegram не доставили сообщение", "\n".join(extra)[:900], "error")
                 db.commit()
         except Exception:
             log.exception("notice")
@@ -1254,6 +1221,91 @@ def alert_body(prefs: dict, channel: str, status_key: str, summary_text: str, co
         if lines:
             parts.append(TOPIC_TITLES[key] + "\n" + "\n".join(lines[:8]))
     return "\n\n".join(part for part in parts if part).strip()
+
+
+def _mail_finding(item: dict, topic: str) -> dict:
+    if topic == "gpp":
+        return {
+            "severity": item.get("severity") or "critical",
+            "hostname": item.get("hostname") or "объект",
+            "title": "В предпочтении групповой политики есть атрибут cpassword. Значение пароля не читалось и в письмо не входит.",
+            "vuln_id": "gpp_password",
+        }
+    return {
+        "severity": item.get("severity") or "",
+        "hostname": item.get("hostname") or "объект",
+        "title": item.get("title") or "",
+        "vuln_id": item.get("vuln_id") or "",
+    }
+
+
+def _redact_delivery(lines: list[str], secrets: list[str]) -> list[str]:
+    clean = list(lines)
+    for secret in secrets:
+        if secret:
+            clean = [line.replace(secret, "***") for line in clean]
+    return clean
+
+
+def dispatch_notifications(db: Session, company: Company, scan: ScanHistory, summary_text: str, collected: list, pdf_path: str | None) -> list[str]:
+    """Каждая включённая почтовая тема уходит отдельным письмом. Telegram остаётся одной сводкой."""
+    channel = channel_row(db)
+    prefs = read_notify_prefs(channel)
+    chat = (company.telegram_chat or channel.telegram_chat or "").strip()
+    status_key = "scan_failed" if scan.status == "failed" else "scan_done"
+    errors: list[str] = []
+    tg_text = alert_body(prefs, "telegram", status_key, summary_text, collected)
+    if tg_text:
+        telegram = send_summary(tg_text, pdf_path if status_key == "scan_done" else None, channel.telegram_token, chat, channel.telegram_proxy)
+        if not telegram.get("ok"):
+            errors.append(str(telegram.get("error") or "Telegram не доставил сводку."))
+    if prefs.get(status_key, {}).get("mail"):
+        headline = "Сканирование остановилось с ошибкой" if status_key == "scan_failed" else "Сканирование завершилось"
+        mail = send_report(
+            company.name,
+            summary_text,
+            [],
+            pdf_path if status_key == "scan_done" else None,
+            company.notify_email,
+            mail_channel(channel),
+            subject=f"{headline} — {company.name}",
+            headline=headline,
+            include_findings=False,
+        )
+        if not mail.get("ok"):
+            errors.append(str(mail.get("error") or "Письмо об итоге не ушло."))
+    buckets: dict[str, list] = {key: [] for key in TOPIC_TITLES}
+    for item in collected:
+        if isinstance(item, dict):
+            for topic in finding_topics(item):
+                if topic in buckets:
+                    buckets[topic].append(item)
+    used: set[tuple[str, str, str]] = set()
+    for key in ("software_danger", "adcs", "gpp", "trust", "critical"):
+        if not prefs.get(key, {}).get("mail"):
+            continue
+        rows = []
+        for item in buckets[key]:
+            marker = (str(item.get("vuln_id") or ""), str(item.get("hostname") or ""), str(item.get("title") or ""))
+            if key == "critical" and marker in used:
+                continue
+            used.add(marker)
+            rows.append(_mail_finding(item, "gpp" if str(item.get("vuln_id") or "") == "gpp_password" else key))
+        if not rows:
+            continue
+        mail = send_report(
+            company.name,
+            TOPIC_TITLES[key] + ". Строки ниже относятся только к этой теме.",
+            rows,
+            None,
+            company.notify_email,
+            mail_channel(channel),
+            subject=f"{TOPIC_TITLES[key]} — {company.name}",
+            headline=TOPIC_TITLES[key],
+        )
+        if not mail.get("ok"):
+            errors.append(str(mail.get("error") or f"Письмо «{TOPIC_TITLES[key]}» не ушло."))
+    return _redact_delivery(errors, [channel.smtp_password or "", channel.telegram_token or ""])
 
 
 def apply_company_schedule(company: Company) -> None:
@@ -1604,9 +1656,36 @@ def ensure_protocol_demo() -> None:
         db.close()
 
 
+def drop_graph_product() -> None:
+    """Старые строки внешнего графа не показываем: проверки Kerberos и делегирования идут по LDAP."""
+    old = "blood" + "hound"
+    sharp = "sharp" + "hound"
+    db = SessionLocal()
+    try:
+        def hit(column):
+            return or_(column.ilike(f"%{old}%"), column.ilike(f"%{sharp}%"))
+
+        db.query(Inventory).filter(or_(hit(Inventory.tags), hit(Inventory.title), hit(Inventory.detail))).delete(synchronize_session=False)
+        db.query(ScanHistory).filter(hit(ScanHistory.module)).delete(synchronize_session=False)
+        for scan in db.query(ScanHistory).all():
+            summary = scan.summary or ""
+            log_text = scan.log or ""
+            lowered = (summary + log_text).lower()
+            if old in lowered or sharp in lowered:
+                pattern = re.compile(old + "|" + sharp, re.IGNORECASE)
+                scan.summary = pattern.sub("каталог", summary)
+                scan.log = pattern.sub("каталог", log_text)
+        db.query(ConsoleNotice).filter(or_(hit(ConsoleNotice.title), hit(ConsoleNotice.body))).delete(synchronize_session=False)
+        db.query(AuditEvent).filter(or_(hit(AuditEvent.action), hit(AuditEvent.detail))).delete(synchronize_session=False)
+        db.commit()
+    finally:
+        db.close()
+
+
 @app.on_event("startup")
 def on_startup() -> None:
     init_db()
+    drop_graph_product()
     ensure_brosec_samples()
     ensure_protocol_demo()
     ensure_saved_reports()
@@ -2601,49 +2680,6 @@ def open_report(scan_id: int, user: User = Depends(get_user), db: Session = Depe
     if REPORTS_DIR.resolve() not in resolved.parents:
         raise HTTPException(status_code=403, detail="Некорректный путь отчета")
     return FileResponse(resolved, media_type="text/html; charset=utf-8")
-
-
-@app.post("/api/import/sharphound")
-async def import_sharphound(
-    company_id: int = Form(...),
-    upload: UploadFile = File(...),
-    user: User = Depends(get_user),
-    db: Session = Depends(get_db),
-) -> dict[str, Any]:
-    company = resolve_company(user, db, company_id)
-    blob = await upload.read()
-    if len(blob) > 80 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="Архив больше 80 МБ")
-    if not blob.startswith(b"PK"):
-        raise HTTPException(status_code=400, detail="Файл не похож на zip-архив SharpHound")
-    try:
-        message = ingest_sharphound_zip(blob)
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"BloodHound CE не принял архив: {exc}") from exc
-    if not str(message).startswith("Архив SharpHound принят"):
-        raise HTTPException(status_code=502, detail=str(message))
-    result = run_bloodhound(None)
-    findings = result.get("findings") or []
-    if findings:
-        replace_findings(db, company.id, "bloodhound", findings)
-    note = (str(message) + " " + str(result.get("message") or "")).strip()
-    scan = ScanHistory(
-        company_id=company.id,
-        module="bloodhound",
-        target_dc=company.dc_host or "",
-        status="success" if result.get("ok") else "partial",
-        started_at=datetime.utcnow(),
-        finished_at=datetime.utcnow(),
-        summary=note[:800],
-        risk_score=None,
-        log="",
-        actor=user.full_name or user.username,
-    )
-    db.add(scan)
-    write_audit(db, user, "sharphound_import", "Загружен архив SharpHound", company.id)
-    publish_notice(db, company.id, "Загружен архив SharpHound", f"{company.name}. Загрузил: {user.full_name or user.username}. {note[:240]}", "import")
-    db.commit()
-    return {"ok": bool(result.get("ok")), "message": note[:800], "findings": len(findings)}
 
 
 @app.delete("/api/demo-profile")

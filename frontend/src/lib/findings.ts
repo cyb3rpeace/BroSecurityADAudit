@@ -71,7 +71,6 @@ export const PATH_IDS = new Set([
 const SOURCE_NAMES: Record<string, string> = {
   protocols: "Протоколы",
   baseline: "Базовый профиль",
-  bloodhound: "BloodHound",
   baseline_hygiene: "Гигиена каталога",
   trusts: "Доверия",
   time_sync: "Время",
@@ -101,7 +100,7 @@ export function isDevice(row: Finding) {
 }
 
 export function isPath(row: Finding) {
-  return PATH_IDS.has(row.vuln_id) || (row.tags || "").includes("bloodhound")
+  return PATH_IDS.has(row.vuln_id)
 }
 
 export function sourceName(row: Finding) {

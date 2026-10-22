@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { Bell, BookOpen, Bot, FileText, LayoutDashboard, Menu, Monitor, Network, Palette, Radar, Settings, Siren, Sparkles, Users, UserRound, Waypoints, Archive } from "lucide-react"
+import { Bell, BookOpen, Bot, FileText, LayoutDashboard, Menu, Monitor, Network, Palette, Radar, Settings, Siren, Sparkles, Users, UserRound, Waypoints } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -15,7 +15,6 @@ import { Paths } from "@/pages/paths"
 import { Reports } from "@/pages/reports"
 import { Docs } from "@/pages/docs"
 import { Scan } from "@/pages/scan"
-import { SharpHound } from "@/pages/collectors"
 import { Settings as SettingsPage } from "@/pages/settings"
 import { Notices } from "@/pages/notices"
 import { AssistantPage } from "@/components/assistant"
@@ -24,6 +23,7 @@ import { Notes } from "@/pages/notes"
 import { Catalog } from "@/pages/catalog"
 import { ProfilePage, SecurityPage } from "@/pages/profile"
 import { RELEASES } from "@/lib/releases"
+import { ScanDock } from "@/components/scan-progress"
 
 const NAV: { group: string; items: { id: View; icon: typeof LayoutDashboard }[] }[] = [
   { group: "nav.g.overview", items: [
@@ -34,9 +34,6 @@ const NAV: { group: string; items: { id: View; icon: typeof LayoutDashboard }[] 
     { id: "paths", icon: Waypoints },
     { id: "devices", icon: Monitor },
     { id: "reports", icon: FileText },
-  ] },
-  { group: "nav.g.manual", items: [
-    { id: "sharphound", icon: Archive },
   ] },
   { group: "nav.g.platform", items: [
     { id: "scan", icon: Radar },
@@ -79,7 +76,6 @@ export function Shell() {
     reports: <Reports />,
     docs: <Docs />,
     scan: <Scan />,
-    sharphound: <SharpHound />,
     notices: <Notices deliveryTick={deliveryTick} />,
     settings: <SettingsPage />,
     assistant: <AssistantPage />,
@@ -185,17 +181,21 @@ export function Shell() {
             </div>
           </div>
         </header>
-        <main className="p-3 pb-16 md:p-5">{pages[app.view]}</main>
+        <main className="p-3 pb-24 md:p-5">
+          {app.directory && !app.directory.ok ? (
+            <div className="mb-3 rounded-xl border border-red-500/50 bg-red-500/10 px-3 py-2 text-sm">Каталог не отвечает. {app.directory.detail || "Проверьте LDAP в настройках."}</div>
+          ) : null}
+          {app.notices.filter((row) => !row.read && row.kind === "error").slice(0, 2).map((row) => (
+            <button key={row.id} type="button" className="mb-3 block w-full rounded-xl border border-red-500/50 bg-red-500/10 px-3 py-2 text-left text-sm" onClick={() => app.setView("notices")}>
+              <span className="font-medium">{row.title}</span>
+              <span className="text-muted-foreground mt-1 block text-xs">{row.body}</span>
+            </button>
+          ))}
+          {pages[app.view]}
+        </main>
       </div>
-      {app.view !== "scan" && (app.liveStatus === "running" || app.liveStatus === "queued") && app.live ? (
-        <button type="button" className="bg-card fixed right-4 bottom-4 z-40 w-80 rounded-xl border p-3 text-left" onClick={() => app.setView("scan")}>
-          <div className="text-sm font-medium">Сканирование идёт</div>
-          <div className="text-muted-foreground mt-1 text-xs">
-            {(app.live.modules || []).find((item) => item.state === "now")?.title || "В очереди"}
-            {app.live.hosts ? " · " + app.live.hosts.seen + " из " + app.live.hosts.total : ""}
-          </div>
-          <div className="text-muted-foreground mt-1 text-[11px]">Открыть вкладку сканирования</div>
-        </button>
+      {app.view !== "scan" && app.live && (app.liveStatus === "running" || app.liveStatus === "queued" || app.liveStatus === "failed" || (app.live.modules || []).some((item) => item.state === "error")) ? (
+        <ScanDock data={app.live} fault={app.liveStatus === "failed" || (app.live.modules || []).some((item) => item.state === "error")} onOpen={() => app.setView("scan")} />
       ) : null}
       <Sheet open={menu} onOpenChange={setMenu}>
         <SheetContent side="left" className="w-72">

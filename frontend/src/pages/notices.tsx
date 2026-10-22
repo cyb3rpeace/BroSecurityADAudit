@@ -73,7 +73,7 @@ export function Notices({ deliveryTick = 0 }: { deliveryTick?: number }) {
           </CardHeader>
           <CardContent className="grid gap-4">
             <p className="text-muted-foreground text-sm">
-              Почта {ready.mail ? "настроена" : "не настроена"}. Telegram {ready.telegram ? "настроен" : "не настроен"}. Адрес сервера и токен остаются в настройках, здесь только выбор событий. Выключенный канал не отправляет сообщение, даже если сканирование что-то нашло.
+              Почта {ready.mail ? "настроена" : "не настроена"}. Telegram {ready.telegram ? "настроен" : "не настроен"}. Каждая включённая почтовая тема уходит отдельным письмом. Общий список критичных находок не повторяет строки, которые уже ушли отдельной темой. Если доставка сорвётся, строка появится в колокольчике и красной плашкой на любой вкладке.
             </p>
             {TOPICS.map((topic) => (
               <div key={topic.id} className="grid gap-2 rounded-lg border p-3 md:grid-cols-[1fr_auto_auto] md:items-center">

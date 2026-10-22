@@ -70,6 +70,9 @@ def send_report(
     pdf_path: str | None = None,
     recipient: str | None = None,
     channel: dict | None = None,
+    subject: str | None = None,
+    headline: str | None = None,
+    include_findings: bool = True,
 ) -> dict[str, str | bool]:
     channel = channel or {}
     server = (channel.get("server") or os.getenv("SMTP_SERVER") or "").strip()
@@ -82,13 +85,29 @@ def send_report(
     username = (channel.get("username") or os.getenv("SMTP_USER") or "").strip()
     password = channel.get("password") if channel.get("password") is not None else (os.getenv("SMTP_PASSWORD") or "")
     message = EmailMessage()
-    message["Subject"] = f"Паспорт безопасности домена — {company_name}"
+    message["Subject"] = subject or f"Паспорт безопасности домена — {company_name}"
     message["From"] = sender
     message["To"] = target
     message.set_content(summary or "Сводка проверки BroSec Audit AD.")
     shown = findings[:25]
     more = len(findings) - len(shown)
     more_line = f'<p style="margin:12px 0 0;color:#a1a1aa;font-size:12px;">В письме первые {len(shown)} из {len(findings)}. Остальные {more} остаются в консоли.</p>' if more > 0 else ""
+    title = headline or "Паспорт безопасности домена"
+    findings_block = ""
+    if include_findings:
+        findings_block = f"""
+        <tr><td style="padding:18px 28px 8px;color:#fafafa;font-size:14px;font-weight:650;">Находки</td></tr>
+        <tr><td style="padding:0 28px 8px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:14px;">
+            <tr>
+              <th align="left" style="padding:8px 12px;border-bottom:1px solid #3f3f46;color:#a1a1aa;font-size:12px;font-weight:600;">Критичность</th>
+              <th align="left" style="padding:8px 12px;border-bottom:1px solid #3f3f46;color:#a1a1aa;font-size:12px;font-weight:600;">Узел</th>
+              <th align="left" style="padding:8px 12px;border-bottom:1px solid #3f3f46;color:#a1a1aa;font-size:12px;font-weight:600;">Находка</th>
+            </tr>
+            {_rows(shown)}
+          </table>
+          {more_line}
+        </td></tr>"""
     logo = Path(__file__).resolve().parents[1] / "static" / "logo.png"
     mark = '<img src="cid:brosec-logo" width="64" height="64" alt="" style="display:block;border-radius:16px;border:0;">' if logo.is_file() else ""
     html_body = f"""<!DOCTYPE html>
@@ -102,27 +121,16 @@ def send_report(
             <td style="padding-right:16px;vertical-align:middle;">{mark}</td>
             <td style="vertical-align:middle;">
               <div style="color:#e879f9;font-size:11px;letter-spacing:.16em;font-weight:650;">BROSEC AUDIT AD</div>
-              <div style="font-size:22px;font-weight:650;line-height:1.3;padding-top:4px;">Паспорт безопасности домена</div>
+              <div style="font-size:22px;font-weight:650;line-height:1.3;padding-top:4px;">{html.escape(title)}</div>
             </td>
           </tr></table>
         </td></tr>
         <tr><td style="padding:8px 28px 0;color:#a1a1aa;font-size:14px;">{html.escape(company_name)}</td></tr>
-        <tr><td style="padding:16px 28px 0;">{_counts(findings)}</td></tr>
+        <tr><td style="padding:16px 28px 0;">{_counts(shown) if include_findings else ""}</td></tr>
         <tr><td style="padding:0 28px;">
           <div style="background:#09090b;border:1px solid #27272a;border-radius:12px;padding:14px 16px;color:#e4e4e7;font-size:14px;line-height:1.5;white-space:pre-wrap;">{html.escape(summary or "Сводка проверки BroSec Audit AD.")}</div>
         </td></tr>
-        <tr><td style="padding:18px 28px 8px;color:#fafafa;font-size:14px;font-weight:650;">Находки</td></tr>
-        <tr><td style="padding:0 28px 8px;">
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:14px;">
-            <tr>
-              <th align="left" style="padding:8px 12px;border-bottom:1px solid #3f3f46;color:#a1a1aa;font-size:12px;font-weight:600;">Критичность</th>
-              <th align="left" style="padding:8px 12px;border-bottom:1px solid #3f3f46;color:#a1a1aa;font-size:12px;font-weight:600;">Узел</th>
-              <th align="left" style="padding:8px 12px;border-bottom:1px solid #3f3f46;color:#a1a1aa;font-size:12px;font-weight:600;">Находка</th>
-            </tr>
-            {_rows(findings)}
-          </table>
-          {more_line}
-        </td></tr>
+        {findings_block}
         <tr><td style="padding:8px 28px 24px;color:#71717a;font-size:12px;line-height:1.5;">Пароли, билеты и значения cpassword в письмо не попадают. Закрытие находки выполняется в консоли BroSec Audit AD.</td></tr>
       </table>
     </td></tr>

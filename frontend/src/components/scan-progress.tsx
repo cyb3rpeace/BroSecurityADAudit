@@ -38,6 +38,37 @@ function HostBar({ total, read, closed, error }: { total: number; read: number; 
   )
 }
 
+export function scanPercent(data: ScanProgressData) {
+  const modules = data.modules || []
+  const done = modules.filter((item) => item.state === "done" || item.state === "error").length
+  const hosts = data.hosts
+  if (hosts?.total) return Math.round(((hosts.seen || 0) / hosts.total) * 100)
+  return Math.round((done / Math.max(modules.length, 1)) * 100)
+}
+
+export function ScanDock({ data, fault, onOpen }: { data: ScanProgressData; fault?: boolean; onOpen: () => void }) {
+  const modules = data.modules || []
+  const current = modules.find((item) => item.state === "now")
+  const broken = modules.find((item) => item.state === "error")
+  const pct = Math.max(scanPercent(data), fault ? 100 : 12)
+  const hosts = data.hosts
+  return (
+    <button type="button" className={"bg-card fixed right-4 bottom-4 z-40 w-96 overflow-hidden rounded-xl border text-left shadow-lg " + (fault ? "border-red-500/70" : "border-emerald-500/60 shadow-[0_8px_30px_rgba(16,185,129,0.18)]")} onClick={onOpen}>
+      <div className="bg-muted h-2" aria-hidden="true">
+        <div className={fault ? "h-full bg-red-500" : "brosec-sheen h-full"} style={{ width: pct + "%" }} />
+      </div>
+      <div className="p-3">
+        <div className="text-sm font-medium">{fault ? "Сканирование остановилось" : "Сканирование идёт"}</div>
+        <div className="text-muted-foreground mt-1 text-xs">
+          {broken?.title || current?.title || "В очереди"}
+          {hosts?.total ? " · " + hosts.seen + " из " + hosts.total : " · " + pct + "%"}
+        </div>
+        <div className="text-muted-foreground mt-1 text-[11px]">{fault ? (broken?.note || "Откройте вкладку, чтобы увидеть, на чём остановился запуск.") : "Открыть вкладку сканирования"}</div>
+      </div>
+    </button>
+  )
+}
+
 export function ScanProgress({ data }: { data: ScanProgressData }) {
   const modules = data.modules || []
   const hosts = data.hosts

@@ -328,7 +328,6 @@
         <button class="nav-btn" data-view="reports" type="button"><svg viewBox="0 0 24 24"><path d="M6 3h9l3 3v15H6z"/><path d="M9 12h6M9 16h6"/></svg><span data-i18n="nav.reports">Отчеты</span></button>
         <div class="group" data-i18n="nav.g.manual">Сбор вручную</div>
         <button class="nav-btn" data-view="pingcastle" type="button"><svg viewBox="0 0 24 24"><path d="M12 3v18M3 12h18"/></svg><span>PingCastle</span></button>
-        <button class="nav-btn" data-view="sharphound" type="button"><svg viewBox="0 0 24 24"><circle cx="6" cy="12" r="2"/><circle cx="18" cy="7" r="2"/><circle cx="18" cy="17" r="2"/><path d="M8 12h8M16 9l-8 2M16 15l-8-2"/></svg><span>SharpHound</span></button>
         <div class="group" data-i18n="nav.g.platform">Платформа</div>
         <button class="nav-btn" data-view="scan" type="button"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10"/></svg><span data-i18n="nav.scan">Сканирование</span></button>
         <button class="nav-btn" data-view="docs" type="button"><svg viewBox="0 0 24 24"><path d="M4 5h12a4 4 0 0 1 4 4v10H8a4 4 0 0 0-4 4z"/><path d="M4 5v14"/></svg><span data-i18n="nav.docs">Документация</span></button>
@@ -407,7 +406,7 @@
 
       <section id="view-paths" class="hidden">
         <h1 data-i18n="path.title">Пути атак</h1>
-        <p class="sub" data-i18n="path.sub">Объекты BloodHound и связанные отклонения Kerberos, делегирования и AD CS. Это карта для защиты, не инструкция атаки.</p>
+        <p class="sub" data-i18n="path.sub">Объекты  и связанные отклонения Kerberos, делегирования и AD CS. Это карта для защиты, не инструкция атаки.</p>
         <div id="paths"></div>
       </section>
 
@@ -445,8 +444,8 @@
         <div id="docs-ru">
           <details class="acc" open>
             <summary>С чего начать</summary>
-            <p>Каталог читает Linux по LDAP или LDAPS. PingCastle и SharpHound ставятся на любой Windows-компьютер в домене: Windows Server 2019 или рабочая станция офицера безопасности. На контроллер их ставить не обязательно.</p>
-            <p><b>Настрой LDAP/LDAPS, установи BloodHound и PingCastle и приступай к сканированию!</b></p>
+            <p>Каталог читает Linux по LDAP или LDAPS. PingCastle и  ставятся на любой Windows-компьютер в домене: Windows Server 2019 или рабочая станция офицера безопасности. На контроллер их ставить не обязательно.</p>
+            <p><b>Настрой LDAP/LDAPS, установи  и PingCastle и приступай к сканированию!</b></p>
           </details>
           <details class="acc">
             <summary>Каталог: LDAPS 636 и простой LDAP 389</summary>
@@ -467,26 +466,17 @@
             </ol>
           </details>
           <details class="acc">
-            <summary>Как скачать и установить SharpHound</summary>
-            <ol>
-              <li>Откройте выпуски SpecterOps SharpHound: <b>https://github.com/SpecterOps/SharpHound/releases</b>. Скачайте SharpHound.exe той же ветки, что понимает BloodHound CE.</li>
-              <li>Распакуйте в <b>C:\Tools\SharpHound</b>. Это программа графа. Она не выгружает хеши и билеты.</li>
-              <li>BloodHound CE уже работает на сервере аудита во внутренней сети Docker. Наружу его публиковать не нужно. Zip загружается со страницы SharpHound, сервер сам кладет архив в CE.</li>
-              <li>Запускайте SharpHound в сессии доменной учетной записи чтения. Отдельный пароль в скрипт не записывается.</li>
-            </ol>
-          </details>
-          <details class="acc">
             <summary>Как связать программы с сервером аудита</summary>
             <p>Два рабочих способа. Выберите тот, до которого сервер аудита реально достучится.</p>
-            <p><b>Способ А. Сервер сам заходит на Windows.</b> В настройках заполните «Windows-хост» — это Server 2019 или компьютер офицера, не контроллер. Транспорт «WinRM» и порт 5986, открытый только с адреса сервера аудита. Учетная запись та же, что для каталога, плюс право удаленного PowerShell на этом хосте. Галочки PingCastle и BloodHound запустят уже установленные exe. Для реестра SMB, LLMNR и подписи LDAP WinRM нужен еще и на контроллере: эти параметры живут там.</p>
-            <p><b>Способ Б. Вручную.</b> Если до компьютера офицера сервер не достучится, SharpHound запускают в уже открытой доменной сессии и загружают zip на странице SharpHound. Пароль домена в команду не подставляется.</p>
+            <p><b>Способ А. Сервер сам заходит на Windows.</b> В настройках заполните «Windows-хост» — это Server 2019 или компьютер офицера, не контроллер. Транспорт «WinRM» и порт 5986, открытый только с адреса сервера аудита. Учетная запись та же, что для каталога, плюс право удаленного PowerShell на этом хосте. Галочки PingCastle и  запустят уже установленные exe. Для реестра SMB, LLMNR и подписи LDAP WinRM нужен еще и на контроллере: эти параметры живут там.</p>
+            <p><b>Способ Б. Вручную.</b> Если до компьютера офицера сервер не достучится,  запускают в уже открытой доменной сессии и загружают zip на странице . Пароль домена в команду не подставляется.</p>
           </details>
           <details class="acc">
             <summary>Какая галочка что запускает</summary>
             <ul>
               <li><b>Гигиена, доверия, часть харденинга</b> — LDAP или LDAPS с Linux.</li>
               <li><b>Опасные протоколы</b> — по LDAP типы шифрования DES и RC4; по WinRM на контроллере SMBv1, подпись SMB, LLMNR, NetBIOS, WPAD, WDigest, NTLMv1, подпись и привязка канала LDAP, анонимный сеанс, PowerShell 2.0, TLS 1.0.</li>
-              <li><b>SharpHound</b> — вручную на Windows, zip загружается на своей странице.</li>
+              <li><b></b> — вручную на Windows, zip загружается на своей странице.</li>
               <li><b>Время, GPO, AD CS, полный харденинг</b> — WinRM на контроллер. Значение cpassword не расшифровывается, билеты не запрашиваются.</li>
             </ul>
           </details>
@@ -504,19 +494,18 @@
             </ul>
           </details>
           <h2 style="margin:18px 0 8px">Что система ищет</h2>
-          <p class="muted">Строка — одна проверка: что найдено и что закрыть. PingCastle разобран по всем правилам текущего выпуска. BloodHound — как читать граф. Платформа сама домен не меняет.</p>
+          <p class="muted">Строка — одна проверка: что найдено и что закрыть. PingCastle разобран по всем правилам текущего выпуска.  — как читать граф. Платформа сама домен не меняет.</p>
           <div class="wiki-tabs" id="wiki-tabs">
             <button type="button" class="chip on" data-wiki="all">Все</button>
             <button type="button" class="chip" data-wiki="platform">Наши проверки</button>
             <button type="button" class="chip" data-wiki="pingcastle">PingCastle</button>
-            <button type="button" class="chip" data-wiki="bloodhound">BloodHound</button>
           </div>
           <div id="wiki-list"></div>
         </div>
         <div class="hidden" id="docs-en">
           <details class="acc" open>
             <summary>Start here</summary>
-            <p>The directory is read from Linux over LDAP or LDAPS. PingCastle and SharpHound run on any domain-joined Windows host: Server 2019 or the security officer workstation. They do not have to be installed on a domain controller.</p>
+            <p>The directory is read from Linux over LDAP or LDAPS. PingCastle and  run on any domain-joined Windows host: Server 2019 or the security officer workstation. They do not have to be installed on a domain controller.</p>
           </details>
           <details class="acc">
             <summary>LDAP 389 and LDAPS 636</summary>
@@ -524,7 +513,7 @@
           </details>
           <details class="acc">
             <summary>Install and connect the tools</summary>
-            <p>Download SharpHound from the SpecterOps GitHub releases and unzip it to C:\Tools\SharpHound. Run it in an existing domain session and upload the zip on the SharpHound page. The domain password is not placed in the command.</p>
+            <p>Download  from the SpecterOps GitHub releases and unzip it to C:\Tools\. Run it in an existing domain session and upload the zip on the  page. The domain password is not placed in the command.</p>
           </details>
           <details class="acc">
             <summary>Reports and MITRE</summary>
@@ -536,7 +525,7 @@
 
       <section id="view-scan" class="hidden">
         <h1 data-i18n="nav.scan">Сканирование</h1>
-        <p class="sub">Эти модули сервер запускает сам: каталог по LDAP и проверки Windows по WinRM. PingCastle и SharpHound загружаются в своих пунктах меню.</p>
+        <p class="sub">Эти модули сервер запускает сам: каталог по LDAP и проверки Windows по WinRM. PingCastle и  загружаются в своих пунктах меню.</p>
         <article class="card">
           <div id="builder" class="checks">
             <label><input type="checkbox" value="ad_cs" checked/> <span data-i18n="mod.cs">AD CS · Windows</span></label>
@@ -581,41 +570,18 @@
         </div>
       </section>
 
-      <section id="view-sharphound" class="hidden">
-        <h1>SharpHound</h1>
-        <p class="sub">SharpHound запускают вручную в том же доменном входе и загружают zip здесь. Хеши и билеты не запрашиваются.</p>
-        <div class="grid-2">
-          <article class="card">
-            <h2>Как собрать граф</h2>
-            <ol>
-              <li>На Windows-хосте откройте обычную доменную сессию, не WinRM.</li>
-              <li>Запустите SharpHound методами DCOnly, Session, LocalAdmin и CA.</li>
-              <li>Загрузите zip справа. Сервер передаст его в BloodHound CE и обновит пути атак.</li>
-            </ol>
-            <pre>C:\Tools\SharpHound\SharpHound.exe -c DCOnly,Session,LocalAdmin,CA --zipfilename brosec --nosavecache</pre>
-          </article>
-          <article class="card">
-            <h2>Загрузка архива</h2>
-            <div class="drop"><div><b>Архив SharpHound</b><br/>Zip коллекции, не больше 80 МБ</div></div>
-            <input id="sh-file" type="file" accept=".zip" style="margin-top:12px"/>
-            <button id="sh-upload" class="btn" type="button" style="margin-top:10px">Загрузить zip</button>
-            <p id="sh-status" class="muted"></p>
-          </article>
-        </div>
-      </section>
-
       <section id="view-settings" class="hidden">
         <h1 data-i18n="nav.settings">Настройки</h1>
         <p class="sub" data-i18n="set.sub">Подключение к каталогу, тенанты и администраторы.</p>
         <div class="flow" id="flow-ru">
           <article><b>1. Каталог</b><p>Служебная учетная запись домена. Linux открывает LDAPS и сам читает пользователей, группы, доверия и схему. Скрипт на Windows для этого не нужен.</p></article>
-          <article><b>2. Программы</b><p>SharpHound.exe ставится на любой Windows: Server 2019 или компьютер офицера. Контроллер для этого не нужен. Архив загружается вручную на странице SharpHound.</p></article>
-          <article><b>3. Оба канала</b><p>Одна учетная запись чтения. Каталог идет по LDAP или LDAPS. SharpHound запускают вручную. Реестр, время и SYSVOL — по WinRM на контроллер.</p></article>
+          <article><b>2. Программы</b><p> ставится на любой Windows: Server 2019 или компьютер офицера. Контроллер для этого не нужен. Архив загружается вручную на странице .</p></article>
+          <article><b>3. Оба канала</b><p>Одна учетная запись чтения. Каталог идет по LDAP или LDAPS.  запускают вручную. Реестр, время и SYSVOL — по WinRM на контроллер.</p></article>
         </div>
         <div class="flow hidden" id="flow-en">
           <article><b>1. Directory</b><p>A domain service account. Linux opens LDAPS and reads users, groups, trusts, and schema. No Windows script is required for that.</p></article>
-          <article><b>2. Programs</b><p>Install SharpHound.exe on any Windows host: Server 2019 or the officer workstation. The domain controller is not required. Upload the zip by hand on the SharpHound page.</p></article>
-          <article><b>3. Both channels</b><p>One read account. The directory uses LDAP or LDAPS. SharpHound is started by hand. Registry, time, and SYSVOL use WinRM to the controller.</p></article>
+          <article><b>2. Programs</b><p>Install  on any Windows host: Server 2019 or the officer workstation. The domain controller is not required. Upload the zip by hand on the  page.</p></article>
+          <article><b>3. Both channels</b><p>One read account. The directory uses LDAP or LDAPS.  is started by hand. Registry, time, and SYSVOL use WinRM to the controller.</p></article>
         </div>
         <div class="split" id="notify-box">
           <form id="mail-form" class="card">
@@ -668,7 +634,7 @@
         <div class="split">
           <form id="company-form" class="card">
             <h2 data-i18n="set.conn">Подключение к Active Directory</h2>
-            <p class="muted" data-i18n="set.conn.help">LDAP 389 или LDAPS 636 читает каталог с Linux. SharpHound загружается вручную. Реестр читается по WinRM с контроллера.</p>
+            <p class="muted" data-i18n="set.conn.help">LDAP 389 или LDAPS 636 читает каталог с Linux.  загружается вручную. Реестр читается по WinRM с контроллера.</p>
             <input id="c-name" data-i18n-ph="set.name" placeholder="Название компании" style="margin-top:8px"/>
             <input id="c-domain" data-i18n-ph="set.domain" placeholder="Домен DNS" style="margin-top:8px"/>
             <input id="dc-host" data-i18n-ph="set.dc" placeholder="Контроллер домена" style="margin-top:8px"/>
@@ -679,7 +645,7 @@
               <option value="ldaps">Каталог: LDAPS, порт 636</option>
               <option value="ldap">Каталог: LDAP, порт 389</option>
             </select>
-            <input id="c-runner" placeholder="Windows-хост для PingCastle и SharpHound, не обязательно контроллер" style="margin-top:8px"/>
+            <input id="c-runner" placeholder="Windows-хост для PingCastle и , не обязательно контроллер" style="margin-top:8px"/>
             <select id="c-transport" style="margin-top:8px">
               <option value="none">Программы: без удалённого запуска</option>
               <option value="winrm">Программы: WinRM на Windows-хост</option>
@@ -768,19 +734,19 @@
         "inc.title": "Инциденты", "inc.sub": "Сигналы выбранной компании. Фильтры сужают таблицу, статус хранится в этом браузере.",
         "inc.volume": "Объем по категориям", "inc.source": "Сигналы по источнику", "inc.signals": "сигналов", "inc.recent": "Последние события",
         "acc.title": "Учетные записи", "acc.sub": "Только учетные записи, у которых найдена проблема: привилегии, пароль, гость, Kerberos.",
-        "path.title": "Пути атак", "path.sub": "Объекты BloodHound и связанные отклонения Kerberos, делегирования и AD CS. Это карта для защиты, не инструкция атаки.",
-        "path.empty": "Путей пока нет. Запустите BloodHound и проверки Kerberos в настройках.",
+        "path.title": "Пути атак", "path.sub": "Объекты  и связанные отклонения Kerberos, делегирования и AD CS. Это карта для защиты, не инструкция атаки.",
+        "path.empty": "Путей пока нет. Запустите  и проверки Kerberos в настройках.",
         "dev.title": "Устройства", "dev.sub": "Хосты, на которых найдена проблема: устаревшая ОС, теневое ПО, протокол, время контроллера.",
         "rep.title": "Отчеты", "rep.sub": "Сравнение двух срезов PingCastle и выгрузки паспорта домена.", "rep.import": "Импорт PingCastle XML",
         "rep.added": "Что появилось", "rep.removed": "Что исчезло", "rep.history": "История срезов", "rep.none": "Два среза еще не готовы.", "rep.new": "Новых правил нет.", "rep.closed": "Закрытых правил нет.",
         "docs.lead": "Архитектура, требования и описание каждого блока.",
         "set.sub": "Подключение к каталогу, тенанты и администраторы.", "set.conn": "Подключение к Active Directory",
-        "set.conn.help": "LDAP 389 или LDAPS 636 читает каталог с Linux. SharpHound загружается вручную. Реестр читается по WinRM с контроллера.",
+        "set.conn.help": "LDAP 389 или LDAPS 636 читает каталог с Linux.  загружается вручную. Реестр читается по WinRM с контроллера.",
         "set.name": "Название компании", "set.domain": "Домен DNS", "set.dc": "Контроллер домена", "set.user": "DOMAIN\\svc-audit или svc-audit@domain",
         "set.pass": "Пароль, пусто — не менять", "set.hosts": "Дополнительные узлы для аудита ПО", "set.mail": "Почта для отчета",
         "set.scan": "Сканирование", "set.tenants": "Тенанты", "set.tenant.add": "Создать компанию", "set.admins": "Администраторы", "set.admin.add": "Создать",
         "set.winrm": "Как открыть контроллер", "set.honey": "Ловушки", "set.honey.help": "Скрипт создает непривилегированные приманки. Пароль на экран не выводится.", "set.honey.build": "Собрать скрипт",
-        "mod.pc": "PingCastle · Windows", "mod.bh": "BloodHound · Windows и граф", "mod.cs": "AD CS · Windows",
+        "mod.pc": "PingCastle · Windows", "mod.bh": " · Windows и граф", "mod.cs": "AD CS · Windows",
         "mod.soft": "Аудит ПО · Windows", "mod.gpp": "Пароли в GPO · Windows", "mod.hard": "Харденинг · LDAPS или Windows", "mod.trust": "Доверия и SID · LDAPS", "mod.time": "Время · Windows", "mod.base": "Гигиена · LDAPS",
         "sch.day": "Каждый день", "save": "Сохранить", "run": "Запустить", "sch.save": "Сохранить расписание", "copy": "Копировать", "copy.ps": "Копировать PowerShell", "close": "Закрыть", "back": "Назад", "next": "Далее", "done": "Начать работу",
         "ai.title": "Копилот домена", "ai.ph": "Спросите про риски выбранной компании", "ai.ask": "Спросить", "ai.hello": "Спросите про топ рисков, устаревшие ОС, пароли или теневое ПО. Ответ строится по выбранной компании.", "ai.wait": "ИИ анализирует домен...",
@@ -805,19 +771,19 @@
         "inc.title": "Incidents", "inc.sub": "Signals for the selected company. Status is stored in this browser.",
         "inc.volume": "Volume by category", "inc.source": "Alerts by source", "inc.signals": "alerts", "inc.recent": "Recent events",
         "acc.title": "Accounts", "acc.sub": "Only accounts that have a finding: privilege, password, guest, Kerberos.",
-        "path.title": "Attack paths", "path.sub": "BloodHound objects and related Kerberos, delegation, and AD CS exposure. Defense map, not an attack guide.",
-        "path.empty": "No paths yet. Run BloodHound and the Kerberos checks in Settings.",
+        "path.title": "Attack paths", "path.sub": " objects and related Kerberos, delegation, and AD CS exposure. Defense map, not an attack guide.",
+        "path.empty": "No paths yet. Run  and the Kerberos checks in Settings.",
         "dev.title": "Devices", "dev.sub": "Hosts with a finding: old OS, shadow software, protocol, or controller time.",
         "rep.title": "Reports", "rep.sub": "Two PingCastle slices and the domain passport export.", "rep.import": "Import PingCastle XML",
         "rep.added": "What appeared", "rep.removed": "What disappeared", "rep.history": "Slice history", "rep.none": "Two slices are not ready yet.", "rep.new": "No new rules.", "rep.closed": "No closed rules.",
         "docs.lead": "Architecture, requirements, and every block.",
         "set.sub": "Directory connection, tenants, and administrators.", "set.conn": "Active Directory connection",
-        "set.conn.help": "LDAP 389 or LDAPS 636 reads the directory from Linux. SharpHound is uploaded by hand. Registry checks use WinRM on the controller.",
+        "set.conn.help": "LDAP 389 or LDAPS 636 reads the directory from Linux.  is uploaded by hand. Registry checks use WinRM on the controller.",
         "set.name": "Company name", "set.domain": "DNS domain", "set.dc": "Domain controller", "set.user": "DOMAIN\\svc-audit or svc-audit@domain",
         "set.pass": "Password, blank keeps the saved one", "set.hosts": "Extra hosts for the software audit", "set.mail": "Report mailbox",
         "set.scan": "Scan", "set.tenants": "Tenants", "set.tenant.add": "Create company", "set.admins": "Administrators", "set.admin.add": "Create",
         "set.winrm": "How to open the controller", "set.honey": "Honeytokens", "set.honey.help": "The script creates unprivileged canaries. The password is not shown.", "set.honey.build": "Build script",
-        "mod.pc": "PingCastle · Windows", "mod.bh": "BloodHound · Windows and graph", "mod.cs": "AD CS · Windows",
+        "mod.pc": "PingCastle · Windows", "mod.bh": " · Windows and graph", "mod.cs": "AD CS · Windows",
         "mod.soft": "Software · Windows", "mod.gpp": "GPO passwords · Windows", "mod.hard": "Hardening · LDAPS or Windows", "mod.trust": "Trusts and SID · LDAPS", "mod.time": "Time · Windows", "mod.base": "Hygiene · LDAPS",
         "sch.day": "Every day", "save": "Save", "run": "Run", "sch.save": "Save schedule", "copy": "Copy", "copy.ps": "Copy PowerShell", "close": "Close", "back": "Back", "next": "Next", "done": "Start",
         "ai.title": "Domain copilot", "ai.ph": "Ask about this company's risks", "ai.ask": "Ask", "ai.hello": "Ask about top risks, old operating systems, passwords, or shadow software. The answer uses the selected company.", "ai.wait": "The model is reading the domain...",
@@ -861,7 +827,7 @@
     function incidents() { return state.inventory.filter((row) => row.severity !== "info"); }
     function isAccount(row) { return ACCOUNT_IDS.has(row.vuln_id); }
     function isDevice(row) { return DEVICE_IDS.has(row.vuln_id) || (row.tags || "").includes("shadow_it"); }
-    function isPath(row) { return PATH_IDS.has(row.vuln_id) || (row.tags || "").includes("bloodhound"); }
+    function isPath(row) { return PATH_IDS.has(row.vuln_id) || (row.tags || "").includes(""); }
     function statuses() { try { return JSON.parse(localStorage.getItem("brosec-status") || "{}"); } catch { return {}; } }
     function rowStatus(row) {
       const saved = statuses()[String(row.id)];
@@ -1087,7 +1053,7 @@
     }
     function sourceName(row) {
       const found = String(row.tags || "").match(/module:([a-z0-9_]+)/);
-      const names = { protocols: "Протоколы", baseline: "Базовый профиль", pingcastle: "PingCastle", bloodhound: "BloodHound", baseline_hygiene: "Гигиена каталога", trusts: "Доверия", time_sync: "Время", dc_hardening: "Харденинг", software_audit: "Аудит ПО", gpp_passwords: "Пароли в GPO", ad_cs: "AD CS", honeytoken: "Ловушки" };
+      const names = { protocols: "Протоколы", baseline: "Базовый профиль", pingcastle: "PingCastle", : "", baseline_hygiene: "Гигиена каталога", trusts: "Доверия", time_sync: "Время", dc_hardening: "Харденинг", software_audit: "Аудит ПО", gpp_passwords: "Пароли в GPO", ad_cs: "AD CS", honeytoken: "Ловушки" };
       if (found) return names[found[1]] || found[1];
       return row.category || "Прочее";
     }
@@ -1294,7 +1260,7 @@
       if (query) { box.innerHTML = wikiRows(items); return; }
       const blocks = [
         ["platform", "Проверки платформы"],
-        ["bloodhound", "BloodHound"]
+        ["", ""]
       ];
       let html = blocks.filter(([key]) => group === "all" || group === key).map(([key, title]) => {
         const rows = items.filter((item) => item.g === key);
@@ -1389,9 +1355,9 @@
       const body = new FormData();
       body.append("company_id", String(companyId()));
       body.append("upload", file);
-      status.textContent = "Архив передается в BloodHound CE...";
+      status.textContent = "Архив передается в ...";
       try {
-        const data = await api("/api/import/sharphound", { method: "POST", body });
+        const data = await api("/api/import/", { method: "POST", body });
         status.textContent = data.message || "Архив принят.";
         await loadDashboard();
       } catch (error) { status.textContent = error.message; }
@@ -1421,15 +1387,15 @@
     const INTRO = {
       ru: [
         ["Что это за система", "BroSec Audit AD показывает риски Active Directory: устаревшие системы, лишние привилегии, доверия без фильтрации SID и расхождение времени контроллеров. Общий балл при этом может еще не вырасти."],
-        ["Куда смотреть", "«Обзор» — сводка и графики. «Инциденты» — все проблемы с фильтрами. «Учетные записи» — люди и службы. «Устройства» — хосты. «Пути атак» — данные BloodHound и Kerberos."],
-        ["Первое сканирование", "Откройте «Настройки». Укажите контроллер и служебную учетную запись домена. Выберите LDAPS 636 или простой LDAP 389. PingCastle и SharpHound ставятся на Windows Server 2019 или на компьютер офицера, не на контроллер. Пока учетные данные не заданы, на экране демонстрационный профиль."],
-        ["Отчеты и справка", "«Отчеты» сравнивают два среза PingCastle и выгружают Excel и PDF. В шапке переключаются светлая тема и язык. Полное описание архитектуры и модулей лежит в «Документации». Настрой LDAP/LDAPS, установи BloodHound и PingCastle и приступай к сканированию!"]
+        ["Куда смотреть", "«Обзор» — сводка и графики. «Инциденты» — все проблемы с фильтрами. «Учетные записи» — люди и службы. «Устройства» — хосты. «Пути атак» — данные  и Kerberos."],
+        ["Первое сканирование", "Откройте «Настройки». Укажите контроллер и служебную учетную запись домена. Выберите LDAPS 636 или простой LDAP 389. PingCastle и  ставятся на Windows Server 2019 или на компьютер офицера, не на контроллер. Пока учетные данные не заданы, на экране демонстрационный профиль."],
+        ["Отчеты и справка", "«Отчеты» сравнивают два среза PingCastle и выгружают Excel и PDF. В шапке переключаются светлая тема и язык. Полное описание архитектуры и модулей лежит в «Документации». Настрой LDAP/LDAPS, установи  и PingCastle и приступай к сканированию!"]
       ],
       en: [
         ["What this is", "BroSec Audit AD shows Active Directory risk before the overall score moves: old systems, extra privileges, trusts without SID filtering, and domain controller time skew."],
-        ["Where to look", "Overview is the scoreboard. Incidents is every finding with filters. Accounts are people and services. Devices are hosts. Attack Paths is BloodHound and Kerberos exposure."],
+        ["Where to look", "Overview is the scoreboard. Incidents is every finding with filters. Accounts are people and services. Devices are hosts. Attack Paths is  and Kerberos exposure."],
         ["First scan", "Open Settings. Set the domain controller, WinRM or SSH, and a dedicated read account. Select modules and press Run. Until credentials are saved, the screen shows the demo profile."],
-        ["Reports and help", "Reports compares two PingCastle slices and exports Excel and PDF. The header switches the light theme and the language. Architecture and every module are in Documentation. Set LDAP or LDAPS, install BloodHound and PingCastle, and start the scan."]
+        ["Reports and help", "Reports compares two PingCastle slices and exports Excel and PDF. The header switches the light theme and the language. Architecture and every module are in Documentation. Set LDAP or LDAPS, install  and PingCastle, and start the scan."]
       ]
     };
     function openIntro(step) {
@@ -1499,7 +1465,7 @@
     });
     document.getElementById("winrm-guide").textContent = [
       "# LDAPS: с сервера аудита до контроллера откройте TCP 636. Учетная запись — чтение каталога, формат DOMAIN\\user.",
-      "# WinRM нужен только для PingCastle.exe, SharpHound.exe, w32tm, SYSVOL и реестра.",
+      "# WinRM нужен только для PingCastle.exe, , w32tm, SYSVOL и реестра.",
       "Enable-PSRemoting -Force",
       "winrm set winrm/config/service/auth '@{Basic=\"false\";Kerberos=\"true\";Negotiate=\"true\"}'",
       "Set-Item WSMan:\\localhost\\Service\\AllowUnencrypted -Value $false",

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { PageHead } from "@/components/bits"
@@ -85,6 +85,12 @@ function shortName(value: string) {
   return value.split(".")[0].replace(/^CN=/i, "").replace(/^DC=/i, "").toLowerCase()
 }
 
+function dnsName(value: string) {
+  if (!value) return ""
+  if (!/DC=/i.test(value)) return value
+  return value.split(",").filter((part) => part.toUpperCase().startsWith("DC=")).map((part) => part.slice(3)).join(".")
+}
+
 function sameHost(left: string, right: string) {
   if (!left || !right) return false
   return left.toLowerCase() === right.toLowerCase() || shortName(left) === shortName(right)
@@ -155,125 +161,68 @@ function Topology({
   onPick: (item: Pick) => void
 }) {
   const [mode, setMode] = useState<"all" | "fail" | "fsmo">("all")
-  const frame = useRef<HTMLDivElement>(null)
-  const drag = useRef<{ x: number; y: number; cx: number; cy: number } | null>(null)
-  const moved = useRef(false)
-  const [cam, setCam] = useState({ x: 28, y: 28, scale: 1 })
-  const width = Math.max(760, Math.max(1, sites.length) * 280 + 40)
-  const height = 520
+  const current = dnsName(domain)
+  const others = domains.filter((name) => name.toLowerCase() !== current.toLowerCase())
   const fsmo = new Set(roles.map((name) => shortName(name)))
-  const nodes = sites.flatMap((site, index) => site.servers.map((server, order) => ({
-    id: shortName(server),
-    label: server,
-    site: site.name,
-    x: 70 + index * 280,
-    y: 150 + order * 54,
-    fsmo: fsmo.has(shortName(server)),
-  })))
-  const byId = new Map(nodes.map((node) => [node.id, node]))
-  const drawn = links.flatMap((link) => {
-    const from = byId.get(shortName(link.source))
-    const to = byId.get(shortName(link.partner))
-    if (!from || !to || from.id === to.id) return []
-    if (mode === "fail" && link.state === "норма") return []
-    return [{ ...link, x1: from.x, y1: from.y, x2: to.x, y2: to.y }]
-  })
-  const visible = nodes.filter((node) => {
-    if (mode === "fsmo") return node.fsmo
-    if (mode === "fail") return drawn.some((link) => shortName(link.source) === node.id || shortName(link.partner) === node.id)
+  const knownSites = new Set(sites.map((site) => site.name.toLowerCase()))
+  const loose = subnets.filter((row) => !row.site || !knownSites.has(row.site.toLowerCase()))
+  const worst = (server: string) => {
+    const mine = links.filter((link) => shortName(link.source) === shortName(server) || shortName(link.partner) === shortName(server))
+    if (!mine.length) return "нет данных"
+    if (mine.some((link) => link.state !== "норма")) return "сбой"
+    return "норма"
+  }
+  const shown = sites.filter((site) => {
+    if (mode === "fsmo") return site.servers.some((server) => fsmo.has(shortName(server)))
+    if (mode === "fail") return site.servers.some((server) => worst(server) === "сбой")
     return true
   })
-
-  function place(next: { x: number; y: number; scale: number }) {
-    const box = frame.current
-    const viewW = box?.clientWidth ?? 900
-    const viewH = box?.clientHeight ?? 520
-    const scaledW = width * next.scale
-    const scaledH = height * next.scale
-    const minX = Math.min(28, viewW - scaledW - 28)
-    const minY = Math.min(28, viewH - scaledH - 28)
-    return {
-      scale: next.scale,
-      x: Math.min(28, Math.max(minX, next.x)),
-      y: Math.min(28, Math.max(minY, next.y)),
-    }
-  }
-
-  useEffect(() => {
-    const node = frame.current
-    if (!node) return
-    const onWheel = (event: WheelEvent) => {
-      event.preventDefault()
-      setCam((current) => place({ ...current, scale: Math.min(1.8, Math.max(0.6, current.scale + (event.deltaY < 0 ? 0.08 : -0.08))) }))
-    }
-    node.addEventListener("wheel", onWheel, { passive: false })
-    return () => node.removeEventListener("wheel", onWheel)
-  }, [width])
-
   return (
-    <div className="overflow-hidden rounded-xl border">
-      <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2">
-        <span className="text-sm font-medium">{domain || "Домен"}</span>
-        <Button type="button" size="sm" variant={mode === "all" ? "default" : "outline"} onClick={() => setMode("all")}>Все</Button>
-        <Button type="button" size="sm" variant={mode === "fail" ? "default" : "outline"} onClick={() => setMode("fail")}>Только сбой</Button>
+    <div className="grid gap-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <Button type="button" size="sm" variant={mode === "all" ? "default" : "outline"} onClick={() => setMode("all")}>Все сайты</Button>
+        <Button type="button" size="sm" variant={mode === "fail" ? "default" : "outline"} onClick={() => setMode("fail")}>Только сбой репликации</Button>
         <Button type="button" size="sm" variant={mode === "fsmo" ? "default" : "outline"} onClick={() => setMode("fsmo")}>Только FSMO</Button>
-        <div className="ml-auto flex gap-1">
-          <Button type="button" size="sm" variant="outline" onClick={() => setCam((current) => place({ ...current, scale: Math.min(1.8, current.scale + 0.12) }))}>+</Button>
-          <Button type="button" size="sm" variant="outline" onClick={() => setCam((current) => place({ ...current, scale: Math.max(0.6, current.scale - 0.12) }))}>−</Button>
-          <Button type="button" size="sm" variant="outline" onClick={() => setCam({ x: 28, y: 28, scale: 1 })}>Сбросить</Button>
-        </div>
       </div>
-      <div
-        ref={frame}
-        className="relative h-[520px] cursor-grab touch-none select-none active:cursor-grabbing"
-        style={{ backgroundImage: "radial-gradient(circle, color-mix(in oklab, var(--foreground) 18%, transparent) 1px, transparent 1px)", backgroundSize: "22px 22px" }}
-        onDragStart={(event) => event.preventDefault()}
-        onPointerDown={(event) => {
-          event.preventDefault()
-          moved.current = false
-          drag.current = { x: event.clientX, y: event.clientY, cx: cam.x, cy: cam.y }
-        }}
-        onPointerMove={(event) => {
-          if (!drag.current) return
-          const dx = event.clientX - drag.current.x
-          const dy = event.clientY - drag.current.y
-          if (Math.abs(dx) + Math.abs(dy) > 4) moved.current = true
-          setCam(place({ x: drag.current.cx + dx, y: drag.current.cy + dy, scale: cam.scale }))
-        }}
-        onPointerUp={() => { drag.current = null }}
-        onPointerCancel={() => { drag.current = null }}
-      >
-        <svg className="absolute left-0 top-0" width={width} height={height} style={{ transform: `translate(${cam.x}px, ${cam.y}px) scale(${cam.scale})`, transformOrigin: "0 0" }}>
-          {drawn.map((link) => (
-            <line key={link.source + link.partner + link.partition} x1={link.x1} y1={link.y1} x2={link.x2} y2={link.y2} stroke={link.state === "норма" ? "#10b981" : "#ef4444"} strokeWidth={2} />
-          ))}
-          {sites.map((site, index) => {
-            const nets = subnets.filter((row) => row.site === site.name)
-            return (
-              <g key={site.name} onClick={() => { if (!moved.current) onPick({ title: site.name, lines: ["Сайт", "Серверы: " + (site.servers.join(", ") || "нет"), "Подсети: " + (nets.map((row) => row.name).join(", ") || "не привязаны")] }) }}>
-                <rect x={24 + index * 280} y={96} width={220} height={36} rx={10} fill="var(--card)" stroke="var(--border)" />
-                <text x={36 + index * 280} y={119} fill="var(--foreground)" fontSize={12}>{site.name}</text>
-              </g>
-            )
-          })}
-          {visible.map((node) => (
-            <g key={node.id} onClick={() => { if (!moved.current) onPick({ title: node.label, lines: ["Сайт " + node.site, node.fsmo ? "Держит роль FSMO" : "Роль FSMO не отмечена", "Связи репликации окрашены: зелёная в норме, красная со сбоем или задержкой."] }) }}>
-              <circle cx={node.x} cy={node.y} r={16} fill={node.fsmo ? "#7c3aed" : "var(--card)"} stroke={node.fsmo ? "#7c3aed" : "var(--border)"} />
-              <text x={node.x + 22} y={node.y + 4} fill="var(--foreground)" fontSize={12}>{node.label}</text>
-            </g>
-          ))}
-          <g onClick={() => { if (!moved.current) onPick({ title: "Лес", lines: domains.length ? domains : ["Имена доменов леса не прочитаны. Смотрится раздел Partitions, флаг домена в systemFlags."] }) }}>
-            <rect x={320} y={24} width={280} height={48} rx={12} fill="var(--card)" stroke="#e879f9" />
-            <text x={332} y={44} fill="var(--muted-foreground)" fontSize={11}>Лес</text>
-            <text x={332} y={62} fill="var(--foreground)" fontSize={12}>{domains.length ? domains.length + " доменов" : "домены не прочитаны"}</text>
-          </g>
-          <g onClick={() => { if (!moved.current) onPick({ title: domain || "Домен", lines: ["Корень схемы.", roles.length ? "FSMO: " + roles.join(", ") : "Роли FSMO не прочитаны"] }) }}>
-            <rect x={24} y={24} width={280} height={48} rx={12} fill="var(--card)" stroke="var(--border)" />
-            <text x={36} y={44} fill="var(--muted-foreground)" fontSize={11}>Домен</text>
-            <text x={36} y={62} fill="var(--foreground)" fontSize={12}>{domain || "имя не прочитано"}</text>
-          </g>
-        </svg>
+      <p className="text-muted-foreground text-xs">Карта показывает, в каком сайте стоит контроллер, какие подсети к нему ходят и дошла ли репликация. Имена других доменов леса — только справка, сами по себе они ничего не чинят.</p>
+      <div className="rounded-xl border border-fuchsia-500/40 p-3">
+        <div className="text-xs text-fuchsia-400">Домен, который читаем</div>
+        <button type="button" className="text-left text-lg font-medium" onClick={() => onPick({ title: current || "Домен", lines: ["Это имя каталога, не три разных домена.", roles.length ? "Роли FSMO: " + roles.join(", ") : "Роли FSMO не прочитаны", others.length ? "Другие домены леса: " + others.join(", ") : "Других доменов в лесу не найдено."] })}>{current || "имя не прочитано"}</button>
+        {others.length ? <p className="text-muted-foreground mt-1 text-xs">В лесу ещё: {others.join(", ")}</p> : null}
       </div>
+      {loose.length ? (
+        <button type="button" className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-left text-sm" onClick={() => onPick({ title: "Подсети без сайта", lines: loose.map((row) => row.name + (row.site ? " · указан чужой сайт " + row.site : " · сайт не назначен")) })}>
+          Подсети без своего сайта: {loose.length}. Клиенты из них могут ходить на случайный контроллер.
+        </button>
+      ) : null}
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        {shown.map((site) => {
+          const nets = subnets.filter((row) => row.site.toLowerCase() === site.name.toLowerCase())
+          const servers = site.servers.filter((server) => mode !== "fsmo" || fsmo.has(shortName(server)))
+          return (
+            <div key={site.name} className="rounded-xl border">
+              <button type="button" className="hover:bg-muted/40 w-full px-3 py-2 text-left" onClick={() => onPick({ title: site.name, lines: ["Сайт", "Контроллеры: " + (site.servers.join(", ") || "нет"), "Подсети: " + (nets.map((row) => row.name).join(", ") || "не привязаны")] })}>
+                <div className="text-xs text-cyan-400">Сайт</div>
+                <div className="font-medium">{site.name}</div>
+                <div className="text-muted-foreground text-xs">{nets.length ? nets.map((row) => row.name).join(", ") : "подсети не привязаны"}</div>
+              </button>
+              <div className="grid gap-1 border-t p-2">
+                {servers.length ? servers.map((server) => {
+                  const state = worst(server)
+                  const holds = fsmo.has(shortName(server))
+                  return (
+                    <button key={server} type="button" className="hover:bg-muted/40 flex items-center justify-between rounded-lg px-2 py-1 text-left text-sm" onClick={() => onPick({ title: server, lines: ["Сайт " + site.name, holds ? "Держит роль FSMO" : "Роль FSMO не отмечена", "Репликация: " + state, "Зелёный статус значит, что последняя репликация свежая и без кода ошибки."] })}>
+                      <span>{server}{holds ? " · FSMO" : ""}</span>
+                      <span className={"rounded-full px-2 py-0.5 text-[11px] " + (state === "норма" ? "bg-emerald-500/15" : state === "сбой" ? "bg-red-500/15" : "bg-muted")}>{state}</span>
+                    </button>
+                  )
+                }) : <p className="text-muted-foreground px-2 py-1 text-xs">Контроллеров в сайте нет.</p>}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      {!shown.length ? <p className="text-muted-foreground text-sm">{sites.length ? "По фильтру сайтов нет." : "Сайты не прочитаны. Без них карта не показывает, куда ходит клиент."}</p> : null}
     </div>
   )
 }
@@ -396,7 +345,7 @@ export function Catalog() {
                     <div className="grid gap-2">
                       {[
                         ["Обзор", "есть", "Число сайтов, контроллеров, политика и состав групп. Кольцевые диаграммы объектов и полосы ОС ещё не перенесены."],
-                        ["Топология", "часть", "Сайты, роли, таблица репликации и имена доменов леса. Нет отдельной матрицы всех разделов."],
+                        ["Топология", "есть", "Сайты, подсети, контроллеры и состояние репликации. Другие домены леса показаны строкой, а не вместо карты."],
                         ["Контроллеры", "часть", "Процессор, память, тома, адаптеры и версия BIOS. Нет размера базы каталога и полного списка томов сверх шести."],
                         ["Учётные записи", "часть", "Политика и списки из открытых инцидентов: PSO, LAPS, krbtgt, пароль не истекает, без AES, давно не входили, компьютеры. Нет отдельного инвентаря gMSA."],
                         ["Группы и OU", "часть", "Тип группы, первые участники и дерево подразделений. Привязка политик к каждому подразделению ещё не рисуется."],

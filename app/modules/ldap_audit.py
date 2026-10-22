@@ -946,12 +946,15 @@ def directory_picture(connection: dict[str, Any]) -> dict[str, Any]:
             ou_nodes.append({"name": name[:80], "path": "/".join(reversed(chain))[:220]})
         domains = []
         if config:
-            for entry in _safe_search(conn, f"CN=Partitions,{config}", "(objectClass=crossRef)", ["dnsRoot", "systemFlags"], 24):
+            for entry in _safe_search(conn, f"CN=Partitions,{config}", "(objectClass=crossRef)", ["dnsRoot", "nCName", "systemFlags"], 24):
                 try:
                     flags = int(_first(entry, "systemFlags") or 0)
                 except (TypeError, ValueError):
                     flags = 0
                 if not flags & 2:
+                    continue
+                context = str(_first(entry, "nCName") or "").upper()
+                if any(token in context for token in ("CN=SCHEMA", "CN=CONFIGURATION", "DNSZONES")):
                     continue
                 dns = str(_first(entry, "dnsRoot") or "")
                 if dns and dns not in domains and len(domains) < 12:

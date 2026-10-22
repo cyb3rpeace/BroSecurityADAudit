@@ -9,7 +9,6 @@ export type View =
   | "reports"
   | "docs"
   | "scan"
-  | "sharphound"
   | "notices"
   | "settings"
   | "assistant"

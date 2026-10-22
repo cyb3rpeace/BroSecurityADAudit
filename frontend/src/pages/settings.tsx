@@ -51,7 +51,7 @@ function fromCompany(company: Company): Form {
 
 const WINRM = [
   "# Каталог: с сервера аудита до контроллера откройте TCP 389 или 636. Учетная запись — чтение каталога.",
-  "# WinRM на контроллере нужен для реестра, времени, SYSVOL и аудита программ. SharpHound загружается вручную.",
+  "# WinRM на контроллере нужен для реестра, времени, SYSVOL и аудита программ.",
   "Enable-PSRemoting -Force",
   "Set-Item WSMan:\\localhost\\Service\\AllowUnencrypted -Value $false",
 ].join("\n")
