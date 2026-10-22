@@ -76,6 +76,7 @@ class NotifyChannel(Base):
     smtp_from = Column(String(255), default="")
     telegram_token = Column(String(255), default="")
     telegram_chat = Column(String(64), default="")
+    prefs = Column(Text, default="")
 
 
 class AssistantSettings(Base):
@@ -241,6 +242,9 @@ def _ensure_columns() -> None:
         scan_names = {row[1] for row in conn.execute(text("PRAGMA table_info(scan_history)")).fetchall()}
         if scan_names and "actor" not in scan_names:
             conn.execute(text("ALTER TABLE scan_history ADD COLUMN actor VARCHAR(128) DEFAULT ''"))
+        notify_names = {row[1] for row in conn.execute(text("PRAGMA table_info(notify_channel)")).fetchall()}
+        if notify_names and "prefs" not in notify_names:
+            conn.execute(text("ALTER TABLE notify_channel ADD COLUMN prefs TEXT DEFAULT ''"))
 
 
 def init_db() -> None:

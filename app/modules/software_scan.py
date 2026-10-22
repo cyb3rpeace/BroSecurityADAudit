@@ -21,10 +21,68 @@ BLACKLIST = (
     ("ultravnc", "UltraVNC", "vnc_detected", "high"),
     ("tightvnc", "TightVNC", "vnc_detected", "high"),
     ("realvnc", "RealVNC", "vnc_detected", "high"),
+    ("tigervnc", "TigerVNC", "vnc_detected", "high"),
+    ("ultraviewer", "UltraViewer", "remote_access_detected", "high"),
+    ("ammyy", "Ammyy Admin", "remote_access_detected", "high"),
+    ("supremo", "Supremo", "remote_access_detected", "high"),
+    ("radmin", "Radmin", "remote_access_detected", "high"),
+    ("dameware", "Dameware", "remote_access_detected", "high"),
+    ("splashtop", "Splashtop", "remote_access_detected", "high"),
+    ("screenconnect", "ScreenConnect", "remote_access_detected", "high"),
+    ("connectwise", "ConnectWise", "remote_access_detected", "high"),
+    ("atera", "Atera", "remote_access_detected", "high"),
+    ("ninjarmm", "NinjaOne", "remote_access_detected", "medium"),
+    ("logmein", "LogMeIn", "remote_access_detected", "high"),
+    ("gotomypc", "GoToMyPC", "remote_access_detected", "high"),
+    ("chrome remote", "Chrome Remote Desktop", "remote_access_detected", "high"),
+    ("anyviewer", "AnyViewer", "remote_access_detected", "high"),
+    ("todesk", "ToDesk", "remote_access_detected", "high"),
+    ("sunlogin", "Sunlogin", "remote_access_detected", "high"),
+    ("oray", "Oray", "remote_access_detected", "high"),
+    ("dwservice", "DWService", "remote_access_detected", "high"),
+    ("meshcentral", "MeshCentral", "remote_access_detected", "medium"),
+    ("parsec", "Parsec", "remote_access_detected", "medium"),
+    ("remotepc", "RemotePC", "remote_access_detected", "high"),
+    ("zoho assist", "Zoho Assist", "remote_access_detected", "medium"),
+    ("netsupport", "NetSupport", "remote_access_detected", "high"),
+    ("litemanager", "LiteManager", "remote_access_detected", "high"),
+    ("remotemanipulator", "Remote Manipulator", "remote_access_detected", "high"),
+    ("rms agent", "RMS", "remote_access_detected", "high"),
+    ("ngrok", "ngrok", "remote_access_detected", "high"),
+    ("cloudflared", "cloudflared", "remote_access_detected", "medium"),
+    ("frpc", "frp", "remote_access_detected", "high"),
+    ("remcos", "Remcos", "rat_detected", "critical"),
+    ("quasar", "QuasarRAT", "rat_detected", "critical"),
+    ("asyncrat", "AsyncRAT", "rat_detected", "critical"),
+    ("njrat", "NjRAT", "rat_detected", "critical"),
+    ("nanocore", "NanoCore", "rat_detected", "critical"),
+    ("darkcomet", "DarkComet", "rat_detected", "critical"),
+    ("warzone", "Warzone RAT", "rat_detected", "critical"),
+    ("orcus", "Orcus", "rat_detected", "critical"),
+    ("dcrat", "DcRAT", "rat_detected", "critical"),
+    ("xworm", "XWorm", "rat_detected", "critical"),
+    ("venom rat", "Venom RAT", "rat_detected", "critical"),
     ("openvpn", "OpenVPN", "vpn_unauthorized", "medium"),
     ("wireguard", "WireGuard", "vpn_unauthorized", "medium"),
     ("protonvpn", "ProtonVPN", "vpn_unauthorized", "medium"),
     ("proton vpn", "ProtonVPN", "vpn_unauthorized", "medium"),
+    ("nordvpn", "NordVPN", "vpn_unauthorized", "medium"),
+    ("expressvpn", "ExpressVPN", "vpn_unauthorized", "medium"),
+    ("surfshark", "Surfshark", "vpn_unauthorized", "medium"),
+    ("windscribe", "Windscribe", "vpn_unauthorized", "medium"),
+    ("tunnelbear", "TunnelBear", "vpn_unauthorized", "medium"),
+    ("hotspot shield", "Hotspot Shield", "vpn_unauthorized", "medium"),
+    ("cyberghost", "CyberGhost", "vpn_unauthorized", "medium"),
+    ("private internet access", "Private Internet Access", "vpn_unauthorized", "medium"),
+    ("mullvad", "Mullvad", "vpn_unauthorized", "medium"),
+    ("atlas vpn", "Atlas VPN", "vpn_unauthorized", "medium"),
+    ("urban vpn", "Urban VPN", "vpn_unauthorized", "medium"),
+    ("psiphon", "Psiphon", "vpn_unauthorized", "high"),
+    ("softether", "SoftEther", "vpn_unauthorized", "medium"),
+    ("tailscale", "Tailscale", "vpn_unauthorized", "medium"),
+    ("zerotier", "ZeroTier", "vpn_unauthorized", "medium"),
+    ("hamachi", "Hamachi", "vpn_unauthorized", "medium"),
+    ("outline client", "Outline", "vpn_unauthorized", "medium"),
 )
 
 
@@ -309,7 +367,7 @@ def _read_software_host(connection: dict[str, Any], host: str) -> tuple[str, lis
     return "ok", findings, ""
 
 
-def scan_software(connection: dict[str, Any], extra_hosts: str) -> dict[str, Any]:
+def scan_software(connection: dict[str, Any], extra_hosts: str, on_progress=None) -> dict[str, Any]:
     from concurrent.futures import ThreadPoolExecutor
 
     findings: list[dict[str, Any]] = []
@@ -317,17 +375,28 @@ def scan_software(connection: dict[str, Any], extra_hosts: str) -> dict[str, Any
     scanned = 0
     closed = 0
     errors: list[str] = []
+    seen = 0
+    total = len(hosts)
+
+    def emit() -> None:
+        if on_progress is None:
+            return
+        on_progress({"total": total, "seen": seen, "read": scanned, "closed": closed, "error": len(errors)})
+
+    emit()
     workers = 8 if len(hosts) > 1 else 1
     with ThreadPoolExecutor(max_workers=workers) as pool:
         for host, (status, host_findings, detail) in zip(hosts, pool.map(lambda item: _read_software_host(connection, item), hosts)):
+            seen += 1
             if status == "closed":
                 closed += 1
-                continue
-            if status != "ok":
+            elif status != "ok":
                 errors.append(f"{host}: {detail}")
-                continue
-            scanned += 1
-            findings.extend(host_findings)
+            else:
+                scanned += 1
+                findings.extend(host_findings)
+            if seen == total or seen % 8 == 0:
+                emit()
     message = f"Опрошено узлов: {scanned}. WinRM не открыт: {closed}. Ошибок чтения: {len(errors)}. Замечаний по ПО: {len(findings)}."
     if errors:
         message += " " + "; ".join(errors[:6])
@@ -487,3 +556,183 @@ def scan_adcs(connection: dict[str, Any]) -> dict[str, Any]:
     else:
         message = f"Рискованных шаблонов AD CS: {len(findings)}."
     return {"ok": True, "findings": findings, "score": None, "message": message}
+
+
+_SECRET_KEY = re.compile(r"(?i)password|cpassword|pwd|passwd|secret")
+
+_DC_EXTRA_PS = r"""
+$ErrorActionPreference = 'Continue'
+$since = (Get-Date).AddHours(-24)
+function Count-Id([int]$id) {
+  try { return @(Get-WinEvent -FilterHashtable @{LogName='Security'; Id=$id; StartTime=$since} -ErrorAction Stop).Count }
+  catch { return -1 }
+}
+Write-Output ('COUNT|' + (Count-Id 4625) + '|' + (Count-Id 4740))
+try {
+  $cs = Get-CimInstance Win32_ComputerSystem
+  $os = Get-CimInstance Win32_OperatingSystem
+  $cpu = @(Get-CimInstance Win32_Processor)[0]
+  $disk = @(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3')[0]
+  $ram = [math]::Round(($cs.TotalPhysicalMemory / 1GB), 1)
+  $freeRam = 0
+  if ($os.TotalVisibleMemorySize -gt 0) { $freeRam = [math]::Round(100 * $os.FreePhysicalMemory / $os.TotalVisibleMemorySize) }
+  $freeDisk = 0
+  if ($disk -and $disk.Size -gt 0) { $freeDisk = [math]::Round(100 * $disk.FreeSpace / $disk.Size) }
+  $maker = (([string]$cs.Manufacturer) -replace '\|','/')
+  $model = (([string]$cs.Model) -replace '\|','/')
+  $cpuName = (([string]$cpu.Name) -replace '\|','/')
+  Write-Output ('HW|' + $maker + '|' + $model + '|' + $ram + '|' + $freeRam + '|' + $cpuName + '|' + $freeDisk)
+} catch { Write-Output 'HW_FAIL' }
+Write-Output 'DC_DONE'
+"""
+
+_LAST_USER_PS = r"""
+$ErrorActionPreference = 'Continue'
+$ui = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\LogonUI' -ErrorAction SilentlyContinue
+$name = [string]$ui.LastLoggedOnSAMUser
+if (-not $name) { $name = [string]$ui.LastLoggedOnUser }
+if ($name) { Write-Output ('LAST|' + ($name -replace '[^\w\\.@$-]', '')) }
+Write-Output 'LAST_DONE'
+"""
+
+_GPO_DIFF_PS = r"""
+$ErrorActionPreference = 'Continue'
+$root = 'C:\Windows\SYSVOL\domain\Policies'
+if (-not (Test-Path -LiteralPath $root)) {
+  $found = Get-ChildItem 'C:\Windows\SYSVOL\sysvol' -Directory -ErrorAction SilentlyContinue | ForEach-Object { Join-Path $_.FullName 'Policies' } | Where-Object { Test-Path $_ } | Select-Object -First 1
+  if ($found) { $root = $found }
+}
+$secret = '(?i)password|cpassword|pwd|passwd|secret'
+$emitted = 0
+Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue | Select-Object -First 80 | ForEach-Object {
+  $guid = $_.Name
+  $inf = Join-Path $_.FullName 'Machine\Microsoft\Windows NT\SecEdit\GptTmpl.inf'
+  if (-not (Test-Path -LiteralPath $inf)) { return }
+  foreach ($line in (Get-Content -LiteralPath $inf -ErrorAction SilentlyContinue)) {
+    if ($emitted -ge 2500) { break }
+    if ($line -match '^[;#\[]' -or $line -notmatch '=') { continue }
+    $pair = $line.Split('=', 2)
+    $key = $pair[0].Trim()
+    $val = $pair[1].Trim()
+    if ($key -match $secret -or $val -match $secret) { $val = '[скрыто]' }
+    if ($key.Length -gt 80 -or $key.Length -eq 0) { continue }
+    if ($val.Length -gt 60) { $val = $val.Substring(0, 60) }
+    Write-Output ('INF|' + $guid + '|' + ($key -replace '\|','/') + '|' + ($val -replace '\|','/'))
+    $emitted++
+  }
+}
+Write-Output 'GPO_DONE'
+"""
+
+
+def last_interactive_user(connection: dict[str, Any], host: str) -> str:
+    """Имя последнего интерактивного входа с узла. Текст сессии не читается."""
+    try:
+        checked = validate_host(host)
+    except ValueError:
+        return ""
+    port = int(connection["ssh_port"] if connection.get("transport") == "ssh" else connection.get("winrm_port") or 5985)
+    if not _port_open(checked, port, timeout=2.0):
+        return ""
+    remote = run_remote(
+        checked,
+        connection["username"],
+        connection["password"],
+        connection["transport"],
+        connection["winrm_port"],
+        connection["ssh_port"],
+        _LAST_USER_PS,
+        timeout=25,
+    )
+    for line in (remote.get("stdout") or "").splitlines():
+        if line.startswith("LAST|") and len(line) > 5:
+            return line.split("|", 1)[1][:80]
+    return ""
+
+
+def controller_extra(connection: dict[str, Any], hosts: list[str]) -> list[dict[str, Any]]:
+    """Железо и счётчики входов по контроллерам. Сообщения журнала не сохраняются."""
+    rows = []
+    for host in hosts[:6]:
+        try:
+            checked = validate_host(host)
+        except ValueError:
+            continue
+        remote = run_remote(
+            checked,
+            connection["username"],
+            connection["password"],
+            connection["transport"],
+            connection["winrm_port"],
+            connection["ssh_port"],
+            _DC_EXTRA_PS,
+            timeout=90,
+        )
+        item: dict[str, Any] = {"host": checked, "ok": "DC_DONE" in (remote.get("stdout") or "")}
+        if not item["ok"]:
+            item["detail"] = (remote.get("error") or remote.get("stderr") or "контроллер не ответил")[:180]
+            rows.append(item)
+            continue
+        for line in remote["stdout"].splitlines():
+            if line.startswith("COUNT|"):
+                parts = line.split("|")
+                if len(parts) >= 3:
+                    item["failed_24h"] = parts[1]
+                    item["locked_24h"] = parts[2]
+            elif line.startswith("HW|"):
+                parts = line.split("|")
+                if len(parts) >= 7:
+                    item.update({
+                        "maker": parts[1],
+                        "model": parts[2],
+                        "ram_gb": parts[3],
+                        "ram_free_pct": parts[4],
+                        "cpu": parts[5],
+                        "disk_free_pct": parts[6],
+                    })
+        rows.append(item)
+    return rows
+
+
+def gpo_conflicts(connection: dict[str, Any], names: dict[str, str]) -> dict[str, Any]:
+    """Сравнение параметров GptTmpl.inf. Значения, похожие на секрет, скрываются."""
+    remote = run_remote(
+        connection["host"],
+        connection["username"],
+        connection["password"],
+        connection["transport"],
+        connection["winrm_port"],
+        connection["ssh_port"],
+        _GPO_DIFF_PS,
+        timeout=180,
+    )
+    stdout = remote.get("stdout") or ""
+    if "GPO_DONE" not in stdout:
+        return {"ok": False, "conflicts": [], "message": (remote.get("error") or remote.get("stderr") or "SYSVOL не прочитан")[:240]}
+    bucket: dict[str, dict[str, str]] = {}
+    for line in stdout.splitlines():
+        if not line.startswith("INF|"):
+            continue
+        parts = line.split("|", 3)
+        if len(parts) < 4:
+            continue
+        guid, key, value = parts[1], parts[2], parts[3]
+        if _SECRET_KEY.search(key) or _SECRET_KEY.search(value):
+            value = "[скрыто]"
+        label = names.get(guid) or names.get(guid.strip("{}")) or guid
+        bucket.setdefault(key, {})[label] = value
+    conflicts = []
+    for key, by_gpo in bucket.items():
+        if len(by_gpo) < 2 or len(set(by_gpo.values())) < 2:
+            continue
+        conflicts.append({
+            "key": key,
+            "values": [{"gpo": name, "value": val} for name, val in list(by_gpo.items())[:6]],
+        })
+        if len(conflicts) >= 30:
+            break
+    return {
+        "ok": True,
+        "conflicts": conflicts,
+        "message": f"Сравнены параметры безопасности политик. Расхождений: {len(conflicts)}. Секреты в значения не попадают.",
+    }

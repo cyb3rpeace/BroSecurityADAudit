@@ -47,7 +47,7 @@ function Rows({ rows, hostLabel }: { rows: Finding[]; hostLabel: string }) {
           </TableHeader>
           <TableBody>
             {slice.length ? slice.map((row) => (
-              <TableRow key={row.id} className="cursor-pointer" onClick={() => void openFinding(row.vuln_id)}>
+              <TableRow key={row.id} className="cursor-pointer" onClick={() => void openFinding(row)}>
                 <TableCell>{row.hostname}</TableCell>
                 <TableCell>
                   <div className="font-medium">{row.title}</div>

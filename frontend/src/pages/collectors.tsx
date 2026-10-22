@@ -7,57 +7,6 @@ import { PageHead } from "@/components/bits"
 import { api } from "@/lib/api"
 import { useApp } from "@/app-state"
 
-export function PingCastle() {
-  const { t, company, companyId, reload } = useApp()
-  const [file, setFile] = useState<File | null>(null)
-  const [status, setStatus] = useState("")
-  const host = company?.dc_host || "ИМЯ-КОНТРОЛЛЕРА"
-  async function upload() {
-    if (!file || !companyId) return
-    const body = new FormData()
-    body.append("company_id", String(companyId))
-    body.append("upload", file)
-    try {
-      const data = await api<{ score: number; findings: number }>("/api/import/pingcastle", { method: "POST", body })
-      const text = `Индекс ${data.score} / ${data.findings}. Правила добавлены в общую статистику.`
-      setStatus(text)
-      toast.success(text)
-      await reload()
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "XML не принят"
-      setStatus(message)
-      toast.error(message)
-    }
-  }
-  return (
-    <div>
-      <PageHead title="PingCastle" sub={t("pc.sub")} />
-      <div className="grid gap-3 xl:grid-cols-2">
-        <Card>
-          <CardHeader><CardTitle>Как снять срез</CardTitle></CardHeader>
-          <CardContent className="grid gap-3 text-sm">
-            <ol className="list-decimal space-y-2 pl-4">
-              <li>Войдите на Windows-хост доменной учетной записью чтения. Не через удаленный WinRM.</li>
-              <li>Запустите уже установленный PingCastle. Контроллер указывается ключом --server.</li>
-              <li>Загрузите появившийся XML справа.</li>
-            </ol>
-            <pre className="bg-muted overflow-auto rounded-lg p-3 text-xs">C:\Tools\PingCastle\PingCastle.exe --healthcheck --server {host}</pre>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader><CardTitle>Загрузка XML</CardTitle></CardHeader>
-          <CardContent className="grid gap-3">
-            <p className="text-muted-foreground text-sm">Файл ad_*.xml, не больше 20 МБ</p>
-            <Input type="file" accept=".xml" onChange={(event) => setFile(event.target.files?.[0] || null)} />
-            <Button onClick={() => void upload()}>Загрузить XML</Button>
-            {status ? <p className="text-sm">{status}</p> : null}
-          </CardContent>
-        </Card>
-      </div>
-    </div>
-  )
-}
-
 export function SharpHound() {
   const { t, companyId, reload } = useApp()
   const [file, setFile] = useState<File | null>(null)

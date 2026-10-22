@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { toast } from "sonner"
 import { ApiError, api } from "@/lib/api"
 import { translate } from "@/lib/i18n"
+import type { ScanProgressData } from "@/components/scan-progress"
 import type { Company, Compare, DirectoryLink, Filters, Finding, Lang, Me, MitreChip, Notice, Remedy, ScanRow, Scheduler, Theme, TimelinePoint, View } from "@/lib/types"
 
 type Dashboard = {
@@ -31,9 +32,13 @@ type Ctx = {
   theme: Theme
   filters: Filters
   remedy: Remedy | null
+  focus: Finding | null
   statusTick: number
   notices: Notice[]
   directory: DirectoryLink | null
+  live: ScanProgressData | null
+  liveStatus: string
+  watchScan: (id: number) => void
   t: (key: string) => string
   login: (username: string, password: string) => Promise<void>
   logout: () => Promise<void>
@@ -43,7 +48,7 @@ type Ctx = {
   patchFilters: (patch: Partial<Filters>) => void
   setCompany: (id: number) => Promise<void>
   reload: () => Promise<void>
-  openFinding: (vulnId: string) => Promise<void>
+  openFinding: (row: Finding) => Promise<void>
   closeFinding: () => void
   bumpStatus: () => void
   markNotice: (id: number) => Promise<void>
@@ -85,10 +90,37 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [theme, setThemeState] = useState<Theme>(storedTheme)
   const [filters, setFilters] = useState<Filters>(emptyFilters)
   const [remedy, setRemedy] = useState<Remedy | null>(null)
+  const [focus, setFocus] = useState<Finding | null>(null)
   const [statusTick, setStatusTick] = useState(0)
   const [notices, setNotices] = useState<Notice[]>([])
   const [directory, setDirectory] = useState<DirectoryLink | null>(null)
+  const [live, setLive] = useState<ScanProgressData | null>(null)
+  const [liveStatus, setLiveStatus] = useState("")
   const scanStamp = useRef("")
+  const watchToken = useRef(0)
+  const watchedId = useRef(0)
+
+  const watchScan = useCallback((id: number) => {
+    watchedId.current = id
+    const token = ++watchToken.current
+    const tick = async () => {
+      if (watchToken.current !== token) return
+      try {
+        const scan = await api<{ status: string; progress: ScanProgressData | null }>("/api/scans/" + id)
+        if (watchToken.current !== token) return
+        setLiveStatus(scan.status || "")
+        if (scan.progress) setLive({ ...scan.progress, status: scan.status })
+        if (scan.status === "queued" || scan.status === "running") {
+          window.setTimeout(() => void tick(), 2000)
+        } else if (watchedId.current === id) {
+          watchedId.current = 0
+        }
+      } catch {
+        if (watchToken.current === token) setLiveStatus("")
+      }
+    }
+    void tick()
+  }, [])
 
   const t = useCallback((key: string) => translate(lang, key), [lang])
 
@@ -209,10 +241,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setNotices((current) => current.filter((row) => row.id !== id))
   }, [])
 
-  const openFinding = useCallback(async (vulnId: string) => {
-    if (!vulnId) return
+  const openFinding = useCallback(async (row: Finding) => {
+    if (!row?.vuln_id) return
+    setFocus(row)
+    setRemedy(null)
     try {
-      const data = await api<Remedy>("/api/remediation/" + encodeURIComponent(vulnId))
+      const data = await api<Remedy>("/api/remediation/" + encodeURIComponent(row.vuln_id))
       setRemedy(data)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Инструкция не открылась")
@@ -227,6 +261,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (document.visibilityState !== "visible") return
       try {
         const rows = await api<ScanRow[]>("/api/scans?company_id=" + companyId)
+        const active = rows.find((row) => row.status === "running" || row.status === "queued")
+        if (alive && active && watchedId.current !== active.id) watchScan(active.id)
         const latest = rows.find((row) => row.status === "success" || row.status === "partial" || row.status === "failed")
         const next = latest ? latest.id + ":" + latest.status + ":" + latest.finished_at : ""
         if (alive && scanStamp.current && next && next !== scanStamp.current) {
@@ -248,17 +284,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       alive = false
       window.clearInterval(timer)
     }
-  }, [companyId, loadDashboard, me, refreshNotices])
+  }, [companyId, loadDashboard, me, refreshNotices, watchScan])
 
   const value = useMemo<Ctx>(() => ({
     loading, me, companies, companyId, company, inventory, timeline, compare, mitre, demo, scheduler,
-    view, lang, theme, filters, remedy, statusTick, notices, directory, t, login, logout, setView, setLang, setTheme,
-    patchFilters, setCompany, reload, openFinding, closeFinding: () => setRemedy(null),
+    view, lang, theme, filters, remedy, focus, statusTick, notices, directory, live, liveStatus, watchScan, t, login, logout, setView, setLang, setTheme,
+    patchFilters, setCompany, reload, openFinding, closeFinding: () => { setRemedy(null); setFocus(null) },
     bumpStatus: () => setStatusTick((n) => n + 1),
     markNotice, markAllNotices, deleteNotice,
   }), [
     loading, me, companies, companyId, company, inventory, timeline, compare, mitre, demo, scheduler,
-    view, lang, theme, filters, remedy, statusTick, notices, directory, t, login, logout, setLang, setTheme,
+    view, lang, theme, filters, remedy, focus, statusTick, notices, directory, live, liveStatus, watchScan, t, login, logout, setLang, setTheme,
     patchFilters, setCompany, reload, openFinding, markNotice, markAllNotices, deleteNotice,
   ])
 

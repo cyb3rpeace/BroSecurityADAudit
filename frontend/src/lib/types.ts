@@ -9,10 +9,12 @@ export type View =
   | "reports"
   | "docs"
   | "scan"
-  | "pingcastle"
   | "sharphound"
   | "notices"
   | "settings"
+  | "assistant"
+  | "notes"
+  | "catalog"
 
 export type Me = {
   username: string

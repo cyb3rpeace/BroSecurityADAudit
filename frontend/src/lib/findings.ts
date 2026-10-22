@@ -23,6 +23,11 @@ export const ACCOUNT_IDS = new Set([
   "pre_windows_2000",
   "foreign_privileged",
   "exchange_permissions",
+  "weak_pso",
+  "empty_security_group",
+  "large_group",
+  "deep_group_nesting",
+  "circular_group_nesting",
 ])
 export const DEVICE_IDS = new Set([
   "obsolete_os",
@@ -31,6 +36,8 @@ export const DEVICE_IDS = new Set([
   "rustdesk_detected",
   "vnc_detected",
   "vpn_unauthorized",
+  "remote_access_detected",
+  "rat_detected",
   "active_smbv1",
   "print_spooler_on_dc",
   "time_skew",
@@ -39,6 +46,12 @@ export const DEVICE_IDS = new Set([
   "single_dc",
   "orphan_subnet",
   "ntfrs_sysvol",
+  "laps_gap",
+  "machine_password_old",
+  "fsmo_single_host",
+  "empty_ou",
+  "dns_wildcard",
+  "webclient_running",
 ])
 export const PATH_IDS = new Set([
   "kerberoasting",
@@ -54,7 +67,6 @@ export const PATH_IDS = new Set([
 const SOURCE_NAMES: Record<string, string> = {
   protocols: "Протоколы",
   baseline: "Базовый профиль",
-  pingcastle: "PingCastle",
   bloodhound: "BloodHound",
   baseline_hygiene: "Гигиена каталога",
   trusts: "Доверия",

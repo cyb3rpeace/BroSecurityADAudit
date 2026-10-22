@@ -29,7 +29,11 @@ CATALOG: dict[str, dict[str, str]] = {
     "kerberoasting": {"id": "T1558.003", "tactic": "Credential Access", "name": "Kerberoasting", "impact": "SPN на обычной учетной записи делает ее пароль целью офлайн-подбора. Платформа билет не запрашивает.", "closure": "Переведите службу на gMSA и уберите SPN со старой записи."},
     "asrep_preauth": {"id": "T1558.004", "tactic": "Credential Access", "name": "AS-REP Roasting", "impact": "Без предварительной проверки подлинности пароль учетной записи проще проверять офлайн.", "closure": "Включите предварительную проверку подлинности Kerberos."},
     "krbtgt_old": {"id": "T1558.001", "tactic": "Credential Access", "name": "Golden Ticket", "impact": "Старый пароль krbtgt дольше сохраняет силу ранее выпущенных билетов домена.", "closure": "Дважды смените пароль krbtgt штатной процедурой с паузой не меньше 10 часов."},
-    "unconstrained_delegation": {"id": "T1558", "tactic": "Credential Access", "name": "Steal or Forge Kerberos Tickets", "impact": "Неограниченное делегирование оставляет на рядовом сервере билеты других пользователей.", "closure": "Снимите флаг со всех узлов, кроме контроллеров домена."},
+    "unconstrained_delegation": {"id": "T1558", "tactic": "Credential Access", "name": "Steal or Forge Kerberos Tickets", "impact": "Неограниченное делегирование оставляет на рядовом сервере билеты других пользователей. В отчётах это связывают с именами Rubeus, PetitPotam, PrinterBug и последующим DCSync. Команды и порядок действий сюда не входят.", "closure": "Снимите флаг со всех узлов, кроме контроллеров домена."},
+    "laps_gap": {"id": "T1078.003", "tactic": "Defense Evasion", "name": "Valid Accounts: Local Accounts", "impact": "Без LAPS пароль локального администратора остаётся общим. Сам пароль платформа не читает.", "closure": "Включите Windows LAPS для этой учётной записи компьютера и проверьте, что срок пароля записывается в каталог."},
+    "machine_password_old": {"id": "T1558", "tactic": "Credential Access", "name": "Steal or Forge Kerberos Tickets", "impact": "Пароль компьютера старше 90 дней домен обычно меняет сам. Долгий срок — признак, что учётная запись машины не работает как задумано.", "closure": "Проверьте, что компьютер в сети, и дайте ему обновить пароль учётной записи. Пароль в отчёт не попадает."},
+    "weak_pso": {"id": "T1110", "tactic": "Credential Access", "name": "Brute Force", "impact": "Точечная политика разрешает более короткий пароль или отключает блокировку для части учёток.", "closure": "Поднимите длину и порог блокировки в этой PSO до уровня доменной политики."},
+    "fsmo_single_host": {"id": "T1489", "tactic": "Impact", "name": "Service Stop", "impact": "Основные роли FSMO лежат на одном контроллере. Его остановка останавливает выдачу RID и смену паролей.", "closure": "Разнесите роли по живым контроллерам по штатной схеме Microsoft."},
     "gpp_password": {"id": "T1552.006", "tactic": "Credential Access", "name": "Group Policy Preferences", "impact": "Пароль в предпочтении GPO лежит в SYSVOL в обратимом виде. Платформа его не расшифровывает.", "closure": "Удалите узлы cpassword и замените секрет на LAPS или gMSA."},
     "adcs_enrollee_san": {"id": "T1649", "tactic": "Credential Access", "name": "Steal or Forge Authentication Certificates", "impact": "Шаблон, где заявитель сам задает имя субъекта, позволяет получить сертификат чужого имени.", "closure": "Запретите SAN от заявителя или включите обязательное согласование выпуска."},
     "trust_sid_filter": {"id": "T1134.005", "tactic": "Privilege Escalation", "name": "SID-History Injection", "impact": "Доверие без фильтрации SID принимает идентификаторы чужого домена, включая привилегированные.", "closure": "Включите фильтрацию SID и, где уместно, выборочную проверку подлинности."},
@@ -69,6 +73,13 @@ CATALOG: dict[str, dict[str, str]] = {
     "exchange_permissions": {"id": "T1078.002", "tactic": "Privilege Escalation", "name": "Valid Accounts: Domain Accounts", "impact": "Лишние участники группы прав Exchange получают широкие права на каталог.", "closure": "Оставьте в группе только учетные записи серверов почты."},
     "password_in_description": {"id": "T1552", "tactic": "Credential Access", "name": "Unsecured Credentials", "impact": "Пароль в описании читает любой, у кого есть право смотреть карточку.", "closure": "Удалите секрет из описания. Текст описания платформа не копирует."},
     "stale_computer": {"id": "T1078.002", "tactic": "Defense Evasion", "name": "Valid Accounts: Domain Accounts", "impact": "Молчащая учетная запись компьютера остается доверенной дольше, чем сам компьютер существует.", "closure": "Отключите запись после сверки с инвентаризацией."},
+    "empty_security_group": {"id": "T1087.002", "tactic": "Discovery", "name": "Account Discovery: Domain Account", "impact": "Пустая группа сама по себе прав не даёт. Её оставляют, когда забывают, зачем она создана.", "closure": "Удалите группу после сверки с владельцем или наполните её по назначению."},
+    "large_group": {"id": "T1078.002", "tactic": "Privilege Escalation", "name": "Valid Accounts: Domain Accounts", "impact": "Очень большая группа раздаёт одно право слишком многим. Список участников платформа не копирует.", "closure": "Разбейте группу по ролям и уберите из неё тех, кому право не нужно."},
+    "deep_group_nesting": {"id": "T1078.002", "tactic": "Privilege Escalation", "name": "Valid Accounts: Domain Accounts", "impact": "Глубокая вложенность прячет, кто в итоге получает право. Путь участников в отчёт не копируется.", "closure": "Сократите вложенность до одного-двух уровней."},
+    "circular_group_nesting": {"id": "T1078.002", "tactic": "Privilege Escalation", "name": "Valid Accounts: Domain Accounts", "impact": "Цикл групп мешает понять, кто в них входит, и ломает расчёт членства.", "closure": "Разорвите цикл: группа не должна входить сама в себя даже через соседей."},
+    "empty_ou": {"id": "T1087.002", "tactic": "Discovery", "name": "Account Discovery: Domain Account", "impact": "Пустое подразделение засоряет дерево и часто хранит старую политику, которая уже ни к чему не привязана.", "closure": "Удалите подразделение или перенесите в него объекты по схеме уровней."},
+    "dns_wildcard": {"id": "T1557.001", "tactic": "Collection", "name": "LLMNR/NBT-NS Poisoning", "impact": "Зона с подстановкой отвечает на имена, которых в домене нет, и уводит клиента не на тот узел.", "closure": "Уберите символ * из имени зоны, если подстановка не согласована."},
+    "webclient_running": {"id": "T1557", "tactic": "Collection", "name": "Adversary-in-the-Middle", "impact": "Служба WebClient на контроллере оставляет ему доступ к WebDAV. В разборах это условие связывают с перехватом сессии. Платформа сессию не пересылает.", "closure": "Остановите и отключите WebClient на контроллерах."},
 }
 
 
@@ -77,13 +88,7 @@ def card(vuln_id: str) -> dict[str, str]:
     if item:
         return item
     if (vuln_id or "").startswith("pc:"):
-        return {
-            "id": "T1087.002",
-            "tactic": "Discovery",
-            "name": "Domain configuration weakness",
-            "impact": "Правило PingCastle показывает слабость зрелости домена. Само по себе оно не описывает атаку.",
-            "closure": "Закройте причину из текста правила и повторите PingCastle.",
-        }
+        return dict(_DEFAULT)
     return dict(_DEFAULT)
 
 

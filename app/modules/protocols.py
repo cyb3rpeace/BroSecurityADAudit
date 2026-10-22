@@ -48,6 +48,8 @@ if ($tls -and [int]$tls -eq 1) { Emit 'tls10_enabled' 'medium' 'На серве�
 $wpad = (Get-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\Internet Settings' -Name EnableAutoproxyResultCache -ErrorAction SilentlyContinue).EnableAutoproxyResultCache
 $wpadOff = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Internet Settings\WinHttp' -Name DisableWpad -ErrorAction SilentlyContinue).DisableWpad
 if (-not ($wpadOff -and [int]$wpadOff -eq 1)) { Emit 'wpad_enabled' 'medium' 'Автопоиск прокси WPAD не отключен' 'DisableWpad не равен 1.' }
+$web = Get-Service -Name WebClient -ErrorAction SilentlyContinue
+if ($web -and $web.Status -eq 'Running') { Emit 'webclient_running' 'medium' 'На контроллере запущена служба WebClient' 'Служба открывает контроллеру доступ к WebDAV. На контроллере её обычно не держат.' }
 Write-Output 'PROTO_DONE'
 """
 

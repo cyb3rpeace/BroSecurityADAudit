@@ -3,8 +3,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Kpi, PageHead, Severity } from "@/components/bits"
-import { Donut, LegendButtons, TrendChart } from "@/components/charts"
-import { deltaOf, driftText, incidentsOf, matchesQuery, palette, rank } from "@/lib/findings"
+import { Donut, Bars, LegendButtons, TrendChart } from "@/components/charts"
+import { ACCOUNT_IDS, DEVICE_IDS, PATH_IDS, deltaOf, driftText, incidentsOf, matchesQuery, palette, rank } from "@/lib/findings"
 import { api } from "@/lib/api"
 import { useApp } from "@/app-state"
 
@@ -17,6 +17,18 @@ export function Overview() {
   const exposed = inventory.filter((row) => ["ordinary_privileged", "stale_password", "kerberoasting", "asrep_preauth", "gpp_password"].includes(row.vuln_id)).length
   const stale = inventory.filter((row) => ["obsolete_os", "inactive_stale"].includes(row.vuln_id)).length
   const order = ["critical", "high", "medium", "low"]
+  const areaRows = [
+    { name: "Учетные записи", value: rows.filter((row) => ACCOUNT_IDS.has(row.vuln_id)).length },
+    { name: "Устройства", value: rows.filter((row) => DEVICE_IDS.has(row.vuln_id)).length },
+    { name: "Пути", value: rows.filter((row) => PATH_IDS.has(row.vuln_id)).length },
+  ]
+  const health = [
+    ["Подпись LDAP", "ldap_signing_not_required"],
+    ["Подпись SMB", "smb_signing_off"],
+    ["Привязка канала", "ldap_channel_binding"],
+    ["Время", "time_skew"],
+    ["WebClient", "webclient_running"],
+  ].map(([label, id]) => ({ label, open: rows.some((row) => row.vuln_id === id) }))
   const slices = order.map((key, index) => ({ name: t("sev." + key), value: rows.filter((row) => row.severity === key).length, fill: colors.donut[index] }))
   const top = rows
     .filter((row) => matchesQuery(row, filters.q) && (!filters.tactic || row.tactic === filters.tactic))
@@ -69,6 +81,26 @@ export function Overview() {
           </CardContent>
         </Card>
       </div>
+      <div className="mb-4 grid gap-3 xl:grid-cols-2">
+        <Card>
+          <CardHeader><CardTitle>Области каталога</CardTitle></CardHeader>
+          <CardContent>
+            <Bars rows={areaRows} active="" colors={colors.bar} onPick={() => undefined} />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle>Контроллер в текущих инцидентах</CardTitle></CardHeader>
+          <CardContent className="grid gap-2 text-sm">
+            {health.map((item) => (
+              <div key={item.label} className="flex items-center justify-between rounded-lg border px-3 py-2">
+                <span>{item.label}</span>
+                <span className={item.open ? "text-red-600 dark:text-red-400" : "text-muted-foreground"}>{item.open ? "есть отклонение" : "не отмечено"}</span>
+              </div>
+            ))}
+            <p className="text-muted-foreground text-xs">«Не отмечено» значит, что такого инцидента нет в текущем каталоге. Это не заменяет повторную проверку, если модуль ещё не запускали.</p>
+          </CardContent>
+        </Card>
+      </div>
       <Card>
         <CardHeader><CardTitle>{t("table.top")}</CardTitle></CardHeader>
         <CardContent>
@@ -85,7 +117,7 @@ export function Overview() {
             </TableHeader>
             <TableBody>
               {top.length ? top.map((row) => (
-                <TableRow key={row.id} className="cursor-pointer" onClick={() => void openFinding(row.vuln_id)}>
+                <TableRow key={row.id} className="cursor-pointer" onClick={() => void openFinding(row)}>
                   <TableCell>
                     <div className="font-medium">{row.title}</div>
                     <div className="text-muted-foreground max-w-md truncate text-xs">{row.detail}</div>

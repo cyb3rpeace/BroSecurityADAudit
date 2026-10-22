@@ -55,15 +55,14 @@ from app.database import (
 )
 from app.modules.bloodhound import ingest_sharphound_zip, run_bloodhound
 from app.modules.dc_hardening import scan_hardening
-from app.modules.ldap_audit import list_computer_names, probe_directory, scan_adcs_ldap, scan_hardening_ldap, scan_hygiene_ldap, scan_trusts_ldap
+from app.modules.ldap_audit import directory_picture, list_computer_names, lookup_asset, probe_directory, scan_adcs_ldap, scan_hardening_ldap, scan_hygiene_ldap, scan_trusts_ldap
 from app.modules.mitre import card as mitre_card
 from app.modules.mitre import tactics_of
 from app.modules.protocols import scan_protocols_ldap, scan_protocols_windows
 from app.modules.notifier_mail import send_report
 from app.modules.notifier_tg import send_summary
-from app.modules.pingcastle import parse_pingcastle_xml, run_pingcastle
 from app.modules.posture import scan_hygiene, scan_time, scan_trusts
-from app.modules.software_scan import repair_caption, scan_gpp, scan_software, validate_host
+from app.modules.software_scan import controller_extra, gpo_conflicts, last_interactive_user, repair_caption, scan_gpp, scan_software, validate_host
 
 load_dotenv(BASE_DIR / ".env")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -74,10 +73,9 @@ try:
 except Exception:
     TZ = ZoneInfo("UTC")
 
-PRODUCT_VERSION = "2.3.0"
+PRODUCT_VERSION = "2.6.0"
 
 ALLOWED_MODULES = (
-    "pingcastle",
     "bloodhound",
     "ad_cs",
     "software_audit",
@@ -89,7 +87,6 @@ ALLOWED_MODULES = (
     "protocols",
 )
 MODULE_TITLES = {
-    "pingcastle": "PingCastle",
     "bloodhound": "BloodHound CE",
     "ad_cs": "AD CS",
     "software_audit": "Аудит ПО",
@@ -459,7 +456,7 @@ def timeline_for(db: Session, company_id: int) -> list[dict[str, Any]]:
                 "score": scan.risk_score,
                 "scan_id": scan.id,
                 "module": scan.module or "",
-                "kind": "pingcastle" if (scan.module or "") == "pingcastle" else "platform",
+                "kind": "platform",
                 "actor": scan.actor or "",
             }
         )
@@ -522,7 +519,6 @@ def windows_connection(connection: dict[str, Any]) -> dict[str, Any]:
 
 def windows_required(module: str) -> dict[str, Any]:
     hints = {
-        "pingcastle": "PingCastle.exe запускается на любом Windows-хосте, который вы укажете: сервер 2019 или компьютер офицера. Это не обязан быть контроллер. Либо откройте WinRM на этот хост, либо запустите сборщик из настроек: он сам выполнит программу и отправит XML на сервер аудита.",
         "protocols": "Реестр SMB, LLMNR, NetBIOS, WDigest и подписи LDAP читается на контроллере по WinRM. Типы шифрования Kerberos при этом уже читаются по LDAP.",
         "software_audit": "Список программ читается из реестра Windows. Нужен WinRM или SSH. Одного LDAPS недостаточно.",
         "gpp_passwords": "SYSVOL читается скриптом на контроллере. Нужен WinRM или SSH. Значение cpassword не расшифровывается.",
@@ -631,7 +627,7 @@ def write_report_file(scan: ScanHistory, company: Company) -> None:
             scan.risk_score,
             scan.summary or "",
             payload.get("findings") or [],
-            "Отчет PingCastle" if (scan.module or "") == "pingcastle" else "Паспорт сканирования",
+            "Паспорт сканирования",
         ),
         encoding="utf-8",
     )
@@ -861,6 +857,54 @@ def publish_scan_notice(db: Session, scan: ScanHistory, company: Company) -> Non
     publish_notice(db, company.id, title, body, "scan")
 
 
+_MODULE_SHORT = {
+    "ad_cs": "AD CS",
+    "software_audit": "Аудит ПО",
+    "gpp_passwords": "Пароли в GPO",
+    "dc_hardening": "Харденинг",
+    "trusts": "Доверия и SID",
+    "time_sync": "Время",
+    "baseline_hygiene": "Гигиена",
+    "protocols": "Протоколы",
+    "bloodhound": "SharpHound",
+}
+
+
+def progress_document(modules: list[str], states: dict[str, str], notes: dict[str, str], times: dict[str, str], hosts: dict[str, int] | None) -> dict[str, Any]:
+    return {
+        "kind": "progress",
+        "modules": [
+            {
+                "id": module,
+                "title": _MODULE_SHORT.get(module, MODULE_TITLES.get(module, module)),
+                "state": states.get(module, "wait"),
+                "note": notes.get(module) or ("ждёт" if states.get(module, "wait") == "wait" else ""),
+                "at": times.get(module, ""),
+            }
+            for module in modules
+        ],
+        "hosts": hosts,
+    }
+
+
+def read_progress(scan: ScanHistory) -> dict[str, Any] | None:
+    try:
+        parsed = json.loads(scan.log or "")
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    progress = parsed.get("progress") if parsed.get("kind") == "live" else parsed if parsed.get("kind") == "progress" else None
+    if not isinstance(progress, dict):
+        return None
+    end = scan.finished_at or datetime.utcnow()
+    start = scan.started_at or end
+    view = dict(progress)
+    view["elapsed_sec"] = max(0, int((end - start).total_seconds()))
+    view["status"] = scan.status
+    return view
+
+
 def execute_scan(scan_id: int) -> None:
     db = SessionLocal()
     scan = db.get(ScanHistory, scan_id)
@@ -898,7 +942,23 @@ def execute_scan(scan_id: int) -> None:
         collected: list[dict[str, Any]] = []
         score = None
         ok_count = 0
+        states = {module: "wait" for module in modules}
+        note_map: dict[str, str] = {}
+        time_map: dict[str, str] = {}
+        hosts_progress: dict[str, int] | None = None
+
+        def save_progress() -> None:
+            scan.log = json.dumps(progress_document(modules, states, note_map, time_map, hosts_progress), ensure_ascii=False)
+            db.commit()
+
+        if modules:
+            states[modules[0]] = "now"
+            time_map[modules[0]] = datetime.now(TZ).strftime("%H:%M")
+        save_progress()
         for module in modules:
+            states[module] = "now"
+            time_map.setdefault(module, datetime.now(TZ).strftime("%H:%M"))
+            save_progress()
             try:
                 if not connection or not connection["username"] or not connection["password"]:
                     result = {
@@ -925,7 +985,7 @@ def execute_scan(scan_id: int) -> None:
                         findings.extend(win_part.get("findings") or [])
                         bits.append(str(win_part.get("message") or ""))
                     else:
-                        bits.append("Реестр контроллера не читался. Для SMB, LLMNR, NetBIOS и WDigest нужен WinRM именно на контроллер. PingCastle при этом запускается с другого Windows-хоста.")
+                        bits.append("Реестр контроллера не читался. Для SMB, LLMNR, NetBIOS и WDigest нужен WinRM именно на контроллер.")
                     result = {"ok": bool(ldap_part.get("ok") or findings), "findings": findings, "score": None, "message": " ".join(bits)}
                 elif module == "ad_cs":
                     result = scan_adcs_ldap(connection)
@@ -933,17 +993,14 @@ def execute_scan(scan_id: int) -> None:
                     result = scan_trusts_ldap(connection) if module == "trusts" else scan_hygiene_ldap(connection)
                 elif module == "dc_hardening" and not dc_windows:
                     result = scan_hardening_ldap(connection)
-                elif module in {"pingcastle", "software_audit"} and not win_connection:
+                elif module == "software_audit" and not win_connection:
                     result = windows_required(module)
-                elif module not in {"pingcastle", "software_audit", "dc_hardening"} and not dc_windows and module not in {"trusts", "baseline_hygiene", "bloodhound", "protocols"}:
+                elif module not in {"software_audit", "dc_hardening"} and not dc_windows and module not in {"trusts", "baseline_hygiene", "bloodhound", "protocols"}:
                     result = windows_required(module)
                 else:
                     remote_tools = windows_connection(win_connection) if win_connection else None
                     remote_dc = windows_connection(dc_windows) if dc_windows else None
-                    if module == "pingcastle":
-                        remote_tools["directory_host"] = host
-                        result = run_pingcastle(remote_tools)
-                    elif module == "software_audit":
+                    if module == "software_audit":
                         extra = company.scan_hosts or ""
                         catalog_note = ""
                         try:
@@ -953,7 +1010,13 @@ def execute_scan(scan_id: int) -> None:
                                 catalog_note = f"Компьютеров в каталоге: {len(discovered)}. "
                         except Exception as exc:
                             catalog_note = f"Список компьютеров каталога не прочитан: {exc}. "
-                        result = scan_software(remote_tools, extra)
+                        def on_hosts(payload: dict[str, int]) -> None:
+                            nonlocal hosts_progress
+                            hosts_progress = payload
+                            note_map[module] = f"{payload.get('seen', 0)} из {payload.get('total', 0)}"
+                            save_progress()
+
+                        result = scan_software(remote_tools, extra, on_hosts)
                         if catalog_note:
                             result["message"] = catalog_note + str(result.get("message") or "")
                     elif module == "gpp_passwords":
@@ -975,20 +1038,29 @@ def execute_scan(scan_id: int) -> None:
             if company.dc_password:
                 message = message.replace(company.dc_password, "[скрыто]")
             notes.append(f"{MODULE_TITLES.get(module, module)}: {message}")
+            short = message.split("\n", 1)[0][:160]
             if result.get("ok"):
                 ok_count += 1
+                states[module] = "done"
+                note_map[module] = short or "готово"
                 replace_findings(db, company.id, module, result.get("findings") or [])
                 collected.extend(result.get("findings") or [])
                 if result.get("score") is not None:
                     score = int(result["score"])
-            db.commit()
+            else:
+                states[module] = "error"
+                note_map[module] = short or "ошибка"
+            save_progress()
         rows = db.query(Inventory).filter(Inventory.company_id == company.id).all()
         if score is None:
             score = score_from_rows(rows)
         company.risk_index = score
         scan.risk_score = score
         scan.summary = "\n".join(notes)[:8000]
-        scan.log = json.dumps({"kind": "live", "findings": collected}, ensure_ascii=False)
+        scan.log = json.dumps(
+            {"kind": "live", "progress": progress_document(modules, states, note_map, time_map, hosts_progress), "findings": collected},
+            ensure_ascii=False,
+        )
         scan.finished_at = datetime.utcnow()
         if ok_count == 0:
             scan.status = "failed"
@@ -1012,16 +1084,24 @@ def execute_scan(scan_id: int) -> None:
         )
         channel = channel_row(db)
         chat = (company.telegram_chat or channel.telegram_chat or "").strip()
-        alerts = [str(item.get("title") or "") for item in collected if item.get("severity") in {"critical", "high"}][:12]
-        alert_text = ("АЛЕРТ\n" + "\n".join(f"- {line}" for line in alerts) + "\n\n") if alerts else ""
-        telegram = send_summary(alert_text + text, str(pdf_path) if pdf_path else None, channel.telegram_token, chat)
-        mail = send_report(
-            company.name,
-            alert_text + (scan.summary or ""),
-            collected,
-            str(pdf_path) if pdf_path else None,
-            company.notify_email,
-            mail_channel(channel),
+        prefs = read_notify_prefs(channel)
+        status_key = "scan_failed" if scan.status == "failed" else "scan_done"
+        mail_text = alert_body(prefs, "mail", status_key, text, collected)
+        tg_text = alert_body(prefs, "telegram", status_key, text, collected)
+        telegram = (
+            send_summary(tg_text, str(pdf_path) if pdf_path else None, channel.telegram_token, chat)
+            if tg_text else {"ok": True}
+        )
+        mail = (
+            send_report(
+                company.name,
+                mail_text,
+                collected if prefs.get("critical", {}).get("mail") or prefs.get("software_danger", {}).get("mail") else [],
+                str(pdf_path) if pdf_path else None,
+                company.notify_email,
+                mail_channel(channel),
+            )
+            if mail_text else {"ok": True}
         )
         extra = []
         if not telegram.get("ok"):
@@ -1054,6 +1134,83 @@ def execute_scan(scan_id: int) -> None:
     finally:
         lock.release()
         db.close()
+
+
+NOTIFY_TOPICS = ("scan_done", "scan_failed", "software_danger", "adcs", "gpp", "trust", "critical")
+SOFTWARE_ALERTS = {"rat_detected", "remote_access_detected", "vpn_unauthorized"}
+TOPIC_TITLES = {
+    "software_danger": "Опасное ПО на хосте",
+    "adcs": "Шаблон сертификатов",
+    "gpp": "Пароль в групповой политике",
+    "trust": "Доверие без фильтрации SID",
+    "critical": "Критичные и высокие находки",
+}
+
+
+def default_notify_prefs() -> dict[str, dict[str, bool]]:
+    return {key: {"mail": True, "telegram": True} for key in NOTIFY_TOPICS}
+
+
+def read_notify_prefs(row: NotifyChannel) -> dict[str, dict[str, bool]]:
+    data = default_notify_prefs()
+    raw = getattr(row, "prefs", "") or ""
+    try:
+        parsed = json.loads(raw) if raw else {}
+    except json.JSONDecodeError:
+        parsed = {}
+    if not isinstance(parsed, dict):
+        return data
+    for key in NOTIFY_TOPICS:
+        item = parsed.get(key)
+        if isinstance(item, dict):
+            if "mail" in item:
+                data[key]["mail"] = bool(item["mail"])
+            if "telegram" in item:
+                data[key]["telegram"] = bool(item["telegram"])
+    return data
+
+
+def finding_topics(item: dict) -> list[str]:
+    vid = str(item.get("vuln_id") or "")
+    topics: list[str] = []
+    if vid in SOFTWARE_ALERTS:
+        topics.append("software_danger")
+    if vid.startswith("adcs"):
+        topics.append("adcs")
+    if vid == "gpp_password":
+        topics.append("gpp")
+    if vid == "trust_sid_filter":
+        topics.append("trust")
+    if str(item.get("severity") or "") in {"critical", "high"}:
+        topics.append("critical")
+    return topics
+
+
+def alert_body(prefs: dict, channel: str, status_key: str, summary_text: str, collected: list) -> str:
+    parts: list[str] = []
+    if prefs.get(status_key, {}).get(channel):
+        parts.append(summary_text)
+    buckets: dict[str, list] = {key: [] for key in TOPIC_TITLES}
+    for item in collected:
+        if not isinstance(item, dict):
+            continue
+        for topic in finding_topics(item):
+            if topic in buckets:
+                buckets[topic].append(item)
+    used: set[tuple[str, str, str]] = set()
+    for key in ("software_danger", "adcs", "gpp", "trust", "critical"):
+        if not prefs.get(key, {}).get(channel):
+            continue
+        lines = []
+        for item in buckets[key]:
+            marker = (str(item.get("vuln_id") or ""), str(item.get("hostname") or ""), str(item.get("title") or ""))
+            if key == "critical" and marker in used:
+                continue
+            used.add(marker)
+            lines.append(f"- {item.get('hostname') or 'объект'}: {item.get('title') or ''}")
+        if lines:
+            parts.append(TOPIC_TITLES[key] + "\n" + "\n".join(lines[:8]))
+    return "\n\n".join(part for part in parts if part).strip()
 
 
 def apply_company_schedule(company: Company) -> None:
@@ -1126,7 +1283,7 @@ def _finding_key(item: dict[str, Any]) -> tuple[str, str, str]:
     )
 
 
-def compare_pingcastle(db: Session, company_id: int) -> dict[str, Any]:
+def compare_scans(db: Session, company_id: int) -> dict[str, Any]:
     scans = (
         db.query(ScanHistory)
         .filter(
@@ -1137,11 +1294,11 @@ def compare_pingcastle(db: Session, company_id: int) -> dict[str, Any]:
         .all()
     )
     packed = [(scan, _scan_findings(scan)) for scan in scans]
-    packed = [(scan, findings) for scan, findings in packed if findings and (scan.module or "") == "pingcastle"]
+    packed = [(scan, findings) for scan, findings in packed if findings and (scan.module or "") != "pingcastle"]
     if len(packed) < 2:
         return {
             "ready": False,
-            "message": "Два среза PingCastle еще не загружены. Этот блок сравнивает только отчеты PingCastle, а не живые виджеты.",
+            "message": "Два сканирования ещё не завершены. Этот блок сравнивает последние запуски платформы.",
             "added": [],
             "removed": [],
         }
@@ -1159,7 +1316,7 @@ def compare_pingcastle(db: Session, company_id: int) -> dict[str, Any]:
 
     return {
         "ready": True,
-        "message": f"Сравнение двух отчетов PingCastle. Появилось {len(added)}, исчезло {len(removed)}. Живые графики при этом показывают текущий каталог, а не эту разницу.",
+        "message": f"Сравнение двух последних сканирований. Появилось {len(added)}, исчезло {len(removed)}.",
         "left": {"id": left_scan.id, "label": label(left_scan), "score": left_scan.risk_score},
         "right": {"id": right_scan.id, "label": label(right_scan), "score": right_scan.risk_score},
         "added": added,
@@ -1258,7 +1415,7 @@ def ensure_brosec_samples() -> None:
         "title": "Анонимные запросы LDAP на выведенном контроллере",
         "severity": "high",
         "detail": "В прошлом срезе контроллер принимал анонимный LDAP. В текущем срезе узел отсутствует.",
-        "tags": "baseline,module:pingcastle",
+        "tags": "baseline,module:baseline_hygiene",
         "vuln_id": "ldap_anonymous_retired",
     }
     db = SessionLocal()
@@ -1564,6 +1721,39 @@ def notifications_put(payload: NotifyIn, user: User = Depends(get_user), db: Ses
     return channel_public(row)
 
 
+class NotifyPrefsIn(BaseModel):
+    topics: dict[str, dict[str, bool]]
+
+
+@app.get("/api/notifications/prefs")
+def notifications_prefs_get(user: User = Depends(get_user), db: Session = Depends(get_db)) -> dict[str, Any]:
+    row = channel_row(db)
+    return {
+        "topics": read_notify_prefs(row),
+        "mail_ready": bool((row.smtp_server or "").strip()),
+        "telegram_ready": bool((row.telegram_token or "").strip() and (row.telegram_chat or "").strip()),
+    }
+
+
+@app.put("/api/notifications/prefs")
+def notifications_prefs_put(payload: NotifyPrefsIn, user: User = Depends(get_user), db: Session = Depends(get_db)) -> dict[str, Any]:
+    row = channel_row(db)
+    current = read_notify_prefs(row)
+    incoming = payload.topics if isinstance(payload.topics, dict) else {}
+    for key in NOTIFY_TOPICS:
+        item = incoming.get(key)
+        if not isinstance(item, dict):
+            continue
+        if "mail" in item:
+            current[key]["mail"] = bool(item["mail"])
+        if "telegram" in item:
+            current[key]["telegram"] = bool(item["telegram"])
+    row.prefs = json.dumps(current, ensure_ascii=False)
+    write_audit(db, user, "notify_prefs", "Обновлены переключатели почты и Telegram")
+    db.commit()
+    return {"topics": current}
+
+
 @app.post("/api/notifications/test-mail")
 def notifications_test_mail(payload: NotifyTestIn, user: User = Depends(get_user), db: Session = Depends(get_db)) -> dict[str, bool]:
     require_superadmin(user)
@@ -1733,6 +1923,91 @@ def directory_status(company_id: int, user: User = Depends(get_user), db: Sessio
     return payload
 
 
+@app.get("/api/asset")
+def asset_context(company_id: int, name: str, user: User = Depends(get_user), db: Session = Depends(get_db)) -> dict[str, Any]:
+    company = resolve_company(user, db, company_id)
+    if not company.dc_host or not company.dc_user or not company.dc_password:
+        return {"found": False, "kind": "", "kind_label": "", "name": name, "rows": []}
+    mode = directory_mode_of(company)
+    connection = connection_from(company, company.dc_host)
+    connection["transport"] = mode
+    connection["ldap_ssl"] = mode == "ldaps"
+    connection["ldap_port"] = 636 if mode == "ldaps" else int(company.ldap_port or 389)
+    data = lookup_asset(connection, name)
+    if data.get("kind") == "computer" and windows_mode_of(company) in {"winrm", "ssh"}:
+        host = str(data.get("dns") or name)
+        win = windows_connection(connection_from(company, company.dc_host))
+        win["transport"] = windows_mode_of(company)
+        last = last_interactive_user(win, host)
+        rows = list(data.get("rows") or [])
+        if last:
+            rows.append({"label": "Последний интерактивный вход", "value": last, "tone": "plain"})
+        else:
+            rows.append({"label": "Последний интерактивный вход", "value": "на узле не прочитан, WinRM закрыт или журнал входа пуст", "tone": "warn"})
+        data["rows"] = rows
+    return data
+
+
+_picture_cache: dict[int, tuple[float, dict[str, Any]]] = {}
+
+
+@app.get("/api/directory/picture")
+def directory_picture_api(company_id: int, user: User = Depends(get_user), db: Session = Depends(get_db)) -> dict[str, Any]:
+    company = resolve_company(user, db, company_id)
+    if not company.dc_host or not company.dc_user or not company.dc_password:
+        return {"ok": False, "message": "Подключение к каталогу ещё не заполнено"}
+    now = datetime.utcnow().timestamp()
+    cached = _picture_cache.get(company.id)
+    if cached and now - cached[0] < 60:
+        return cached[1]
+    mode = directory_mode_of(company)
+    connection = connection_from(company, company.dc_host)
+    connection["transport"] = mode
+    connection["ldap_ssl"] = mode == "ldaps"
+    connection["ldap_port"] = 636 if mode == "ldaps" else int(company.ldap_port or 389)
+    picture = directory_picture(connection)
+    _picture_cache[company.id] = (now, picture)
+    return picture
+
+
+@app.get("/api/directory/windows")
+def directory_windows(company_id: int, user: User = Depends(get_user), db: Session = Depends(get_db)) -> dict[str, Any]:
+    company = resolve_company(user, db, company_id)
+    if windows_mode_of(company) not in {"winrm", "ssh"} or not company.dc_host or not company.dc_user or not company.dc_password:
+        return {"ok": False, "controllers": [], "conflicts": [], "message": "WinRM к контроллеру не задан"}
+    mode = directory_mode_of(company)
+    ldap_conn = connection_from(company, company.dc_host)
+    ldap_conn["transport"] = mode
+    ldap_conn["ldap_ssl"] = mode == "ldaps"
+    ldap_conn["ldap_port"] = 636 if mode == "ldaps" else int(company.ldap_port or 389)
+    picture = directory_picture(ldap_conn)
+    hosts = []
+    for row in picture.get("dcs") or []:
+        host = str(row.get("host") or row.get("name") or "")
+        if host and host not in hosts:
+            hosts.append(host)
+    if company.dc_host not in hosts:
+        hosts.insert(0, company.dc_host)
+    names = {}
+    for row in picture.get("gpos") or []:
+        guid = str(row.get("id") or "")
+        title = str(row.get("name") or guid)
+        if guid:
+            names[guid] = title
+            names[guid.strip("{}")] = title
+    win = windows_connection(connection_from(company, company.dc_host))
+    win["transport"] = windows_mode_of(company)
+    controllers = controller_extra(win, hosts)
+    diff = gpo_conflicts(win, names)
+    readable = sum(1 for row in controllers if row.get("ok"))
+    return {
+        "ok": bool(readable or diff.get("ok")),
+        "controllers": controllers,
+        "conflicts": diff.get("conflicts") or [],
+        "message": f"Контроллеров ответило: {readable} из {len(hosts[:6])}. {diff.get('message') or ''}".strip(),
+    }
+
+
 @app.get("/api/companies")
 def companies(user: User = Depends(get_user), db: Session = Depends(get_db)) -> list[dict[str, Any]]:
     if user.role == "superadmin":
@@ -1803,7 +2078,10 @@ def create_user(payload: UserIn, user: User = Depends(get_user), db: Session = D
 @app.get("/api/dashboard")
 def dashboard(company_id: int, user: User = Depends(get_user), db: Session = Depends(get_db)) -> dict[str, Any]:
     company = resolve_company(user, db, company_id)
-    rows = db.query(Inventory).filter(Inventory.company_id == company.id).order_by(Inventory.id.asc()).all()
+    rows = [
+        row for row in db.query(Inventory).filter(Inventory.company_id == company.id).order_by(Inventory.id.asc()).all()
+        if "module:pingcastle" not in (row.tags or "") and not str(row.vuln_id or "").startswith("pc:")
+    ]
     timeline = timeline_for(db, company.id)
     drift = None
     if len(timeline) >= 2:
@@ -1820,7 +2098,7 @@ def dashboard(company_id: int, user: User = Depends(get_user), db: Session = Dep
         "timeline": timeline,
         "inventory": [inventory_public(row) for row in rows],
         "demo_profile": any(row.status == "baseline" for row in rows),
-        "compare": compare_pingcastle(db, company.id),
+        "compare": compare_scans(db, company.id),
         "mitre": tactics_of([row for row in rows if row.severity != "info"]),
     }
 
@@ -1869,7 +2147,9 @@ def scan_status(scan_id: int, user: User = Depends(get_user), db: Session = Depe
         "status": scan.status,
         "summary": scan.summary or "",
         "risk_score": scan.risk_score,
+        "started_at": scan.started_at.isoformat() if scan.started_at else "",
         "finished_at": scan.finished_at.strftime("%d.%m.%Y %H:%M") if scan.finished_at else "",
+        "progress": read_progress(scan),
     }
 
 
@@ -2087,45 +2367,6 @@ def open_report(scan_id: int, user: User = Depends(get_user), db: Session = Depe
     return FileResponse(resolved, media_type="text/html; charset=utf-8")
 
 
-@app.post("/api/import/pingcastle")
-async def import_pingcastle(
-    company_id: int = Form(...),
-    upload: UploadFile = File(...),
-    user: User = Depends(get_user),
-    db: Session = Depends(get_db),
-) -> dict[str, Any]:
-    company = resolve_company(user, db, company_id)
-    blob = await upload.read()
-    if len(blob) > 20_000_000:
-        raise HTTPException(status_code=413, detail="Файл больше 20 МБ")
-    try:
-        parsed = parse_pingcastle_xml(blob.decode("utf-8", errors="replace"))
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"XML не разобран: {exc}") from exc
-    scan = ScanHistory(
-        company_id=company.id,
-        module="pingcastle",
-        target_dc=company.dc_host or parsed.get("domain") or "",
-        status="success",
-        started_at=datetime.utcnow(),
-        finished_at=datetime.utcnow(),
-        summary=f"Импортирован XML PingCastle. Домен {parsed.get('domain') or 'не указан'}, индекс {parsed['score']}.",
-        risk_score=parsed["score"],
-        log=json.dumps({"kind": "import", "findings": parsed["findings"]}, ensure_ascii=False),
-        actor=user.full_name or user.username,
-    )
-    db.add(scan)
-    db.flush()
-    replace_findings(db, company.id, "pingcastle", parsed["findings"])
-    company.risk_index = parsed["score"]
-    scan.report_html_path = str(REPORTS_DIR / str(company.id) / f"{scan.id}.html")
-    write_report_file(scan, company)
-    write_audit(db, user, "pingcastle_import", f"Загружен XML PingCastle, индекс {parsed['score']}", company.id)
-    publish_notice(db, company.id, "Загружен отчет PingCastle", f"{company.name}. Индекс {parsed['score']}. Загрузил: {user.full_name or user.username}.", "import")
-    db.commit()
-    return {"scan_id": scan.id, "score": parsed["score"], "findings": len(parsed["findings"])}
-
-
 @app.post("/api/import/sharphound")
 async def import_sharphound(
     company_id: int = Form(...),
@@ -2181,26 +2422,16 @@ def collector_script(company: Company, token: str, origin: str) -> str:
     origin = origin.rstrip("/")
     return f"""# BroSec Audit AD — сборщик для Windows Server 2019 или Windows 11.
 # Запускайте в консоли, где уже выполнен вход учетной записью с правом чтения домена.
-# Пароль в скрипт не подставляется. PingCastle и SharpHound лежат на ЭТОМ компьютере, не обязательно на контроллере.
+# Контроллер каталога для ручной сверки: {dc}
+# Пароль в скрипт не подставляется. SharpHound лежит на ЭТОМ компьютере, не обязательно на контроллере.
 $ErrorActionPreference = 'Stop'
 $Audit = '{origin}'
 $Token = '{token}'
-$Dc = '{dc}'
-$PingCastle = 'C:\\Tools\\PingCastle\\PingCastle.exe'
 $SharpHound = 'C:\\Tools\\SharpHound\\SharpHound.exe'
-if (-not (Test-Path -LiteralPath $PingCastle)) {{ $PingCastle = 'C:\\Program Files\\PingCastle\\PingCastle.exe' }}
 if (-not (Test-Path -LiteralPath $SharpHound)) {{ $SharpHound = 'C:\\Program Files\\SharpHound\\SharpHound.exe' }}
-if (-not (Test-Path -LiteralPath $PingCastle)) {{ throw 'PingCastle.exe не найден. Скачайте выпуск Netwrix PingCastle и распакуйте в C:\\Tools\\PingCastle' }}
 if (-not (Test-Path -LiteralPath $SharpHound)) {{ throw 'SharpHound.exe не найден. Скачайте выпуск SpecterOps SharpHound и распакуйте в C:\\Tools\\SharpHound' }}
 $work = Join-Path $env:TEMP 'brosec-collector'
 New-Item -ItemType Directory -Force -Path $work | Out-Null
-$started = Get-Date
-Push-Location $work
-try {{ & $PingCastle --healthcheck --server $Dc }} finally {{ Pop-Location }}
-$xml = Get-ChildItem -Path $work, (Split-Path -Parent $PingCastle) -Filter *.xml -ErrorAction SilentlyContinue |
-  Where-Object {{ $_.LastWriteTime -ge $started.AddMinutes(-3) }} | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-if (-not $xml) {{ throw 'PingCastle не создал XML' }}
-curl.exe -sS -f -H "X-Collector-Token: $Token" -F "upload=@$($xml.FullName)" "$Audit/api/ingest/pingcastle"
 Get-ChildItem -LiteralPath $work -Filter *.zip -ErrorAction SilentlyContinue | Remove-Item -Force
 & $SharpHound -c DCOnly,Session,LocalAdmin,CA --outputdirectory $work --zipfilename brosec --nosavecache --memcache
 $zip = Get-ChildItem -LiteralPath $work -Filter *.zip | Sort-Object LastWriteTime -Descending | Select-Object -First 1
@@ -2221,41 +2452,6 @@ def collector_download(company_id: int, request: Request, user: User = Depends(g
     if origin.startswith("http://"):
         origin = "https://" + origin[len("http://"):]
     return {"script": collector_script(company, token, origin)}
-
-
-@app.post("/api/ingest/pingcastle")
-async def ingest_pingcastle(request: Request, upload: UploadFile = File(...), db: Session = Depends(get_db)) -> dict[str, Any]:
-    company = _company_by_collector(db, request.headers.get("x-collector-token", ""))
-    if company is None:
-        raise HTTPException(status_code=401, detail="Сборщик не опознан. Соберите скрипт заново в настройках.")
-    blob = await upload.read()
-    if len(blob) > 20_000_000:
-        raise HTTPException(status_code=413, detail="Файл больше 20 МБ")
-    try:
-        parsed = parse_pingcastle_xml(blob.decode("utf-8", errors="replace"))
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"XML не разобран: {exc}") from exc
-    scan = ScanHistory(
-        company_id=company.id,
-        module="pingcastle",
-        target_dc=company.dc_host or parsed.get("domain") or "",
-        status="success",
-        started_at=datetime.utcnow(),
-        finished_at=datetime.utcnow(),
-        summary=f"Сборщик прислал PingCastle. Индекс {parsed['score']}.",
-        risk_score=parsed["score"],
-        log=json.dumps({"kind": "collector", "findings": parsed["findings"]}, ensure_ascii=False),
-        actor="Сборщик",
-    )
-    db.add(scan)
-    db.flush()
-    replace_findings(db, company.id, "pingcastle", parsed["findings"])
-    company.risk_index = parsed["score"]
-    scan.report_html_path = str(REPORTS_DIR / str(company.id) / f"{scan.id}.html")
-    write_report_file(scan, company)
-    publish_notice(db, company.id, "Сборщик прислал PingCastle", f"{company.name}. Индекс {parsed['score']}.", "import")
-    db.commit()
-    return {"ok": True, "score": parsed["score"], "findings": len(parsed["findings"])}
 
 
 @app.post("/api/ingest/sharphound")
@@ -2709,20 +2905,19 @@ Get-ADUser Guest -Properties Enabled | Select-Object SamAccountName, Enabled
 def remediation(vuln_id: str, user: User = Depends(get_user)) -> dict[str, Any]:
     del user
     item = REMEDIATION.get(vuln_id)
-    if item is None and vuln_id.startswith("pc:"):
-        item = {
-            "title": f"Правило PingCastle {vuln_id[3:]}",
-            "severity": "medium",
-            "summary": "Сработало правило оценки зрелости домена. Устраняйте причину из текста правила в отчете, не используя его как инструкцию для атаки.",
-            "steps": [
-                "Откройте детальный HTML-отчет и прочитайте обоснование правила.",
-                "Сопоставьте правило с контролем CIS Benchmark для вашей версии Windows Server.",
-                "Внесите изменение в политику и повторите PingCastle.",
-            ],
-            "powershell": "Write-Output 'Повторите проверку PingCastle после изменения политики.'\n",
-        }
     if item is None:
-        raise HTTPException(status_code=404, detail="Инструкция для этой находки не заведена")
+        meta_hint = mitre_card(vuln_id)
+        item = {
+            "title": meta_hint["name"],
+            "severity": "medium",
+            "summary": meta_hint["impact"],
+            "steps": [
+                "Сверьте объект с владельцем и с текстом находки.",
+                "Закройте отклонение штатной настройкой домена.",
+                "Повторите ту же проверку и убедитесь, что запись исчезла.",
+            ],
+            "powershell": "Write-Output 'Изменение вносится вручную после согласования. Этот текст каталог не меняет.'\n",
+        }
     cis, gost = STANDARDS.get(vuln_id, ("CIS Benchmark для Windows Server", "ГОСТ Р ИСО/МЭК 27001"))
     meta = mitre_card(vuln_id)
     return {"vuln_id": vuln_id, "cis": cis, "gost": gost, "mitre": meta["id"], "tactic": meta["tactic"], "technique": meta["name"], "impact": meta["impact"], "closure": meta["closure"], **item}

@@ -53,7 +53,7 @@ function fromCompany(company: Company): Form {
 
 const WINRM = [
   "# Каталог: с сервера аудита до контроллера откройте TCP 389 или 636. Учетная запись — чтение каталога.",
-  "# WinRM на контроллере нужен для реестра, времени, SYSVOL и аудита программ. PingCastle и SharpHound загружаются вручную.",
+  "# WinRM на контроллере нужен для реестра, времени, SYSVOL и аудита программ. SharpHound загружается вручную.",
   "Enable-PSRemoting -Force",
   "Set-Item WSMan:\\localhost\\Service\\AllowUnencrypted -Value $false",
 ].join("\n")
@@ -98,14 +98,28 @@ export function Settings() {
           <Accordion type="multiple" defaultValue={["conn"]} className="gap-2">
             <AccordionItem value="conn" className="rounded-xl border px-4">
               <AccordionTrigger>{t("set.conn")}</AccordionTrigger>
-              <AccordionContent className="grid gap-2">
+              <AccordionContent className="grid gap-3">
                 <p className="text-muted-foreground text-sm">{t("set.conn.help")}</p>
-                <Input value={form.name} disabled={!me?.is_superadmin} placeholder="Название компании" onChange={(event) => set("name", event.target.value)} />
-                <Input value={form.domain} placeholder="Домен DNS" onChange={(event) => set("domain", event.target.value)} />
-                <Input value={form.dc_host} placeholder="Контроллер домена" onChange={(event) => set("dc_host", event.target.value)} />
-                <Input value={form.dc_user} placeholder="DOMAIN\svc-audit или svc-audit@domain" onChange={(event) => set("dc_user", event.target.value)} />
-                <Input type="password" value={form.dc_password} placeholder="Пароль, пусто — не менять" autoComplete="new-password" onChange={(event) => set("dc_password", event.target.value)} />
-                <p className="text-muted-foreground text-xs">{company?.dc_password_set ? t("pass.set") : t("pass.miss")}</p>
+                <div className="grid gap-3 lg:grid-cols-2">
+                  <Card>
+                    <CardHeader><CardTitle className="text-base">Компания</CardTitle></CardHeader>
+                    <CardContent className="grid gap-2">
+                      <Input value={form.name} disabled={!me?.is_superadmin} placeholder="Название компании" onChange={(event) => set("name", event.target.value)} />
+                      <Input value={form.domain} placeholder="Домен DNS" onChange={(event) => set("domain", event.target.value)} />
+                      <Input value={form.notify_email} placeholder="Почта для отчета этой компании" onChange={(event) => set("notify_email", event.target.value)} />
+                      <Input value={form.telegram_chat} placeholder="Chat id Telegram этой компании" onChange={(event) => set("telegram_chat", event.target.value)} />
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardHeader><CardTitle className="text-base">Каталог</CardTitle></CardHeader>
+                    <CardContent className="grid gap-2">
+                      <Input value={form.dc_host} placeholder="Контроллер домена" onChange={(event) => set("dc_host", event.target.value)} />
+                      <Input value={form.dc_user} placeholder="DOMAIN\svc-audit или svc-audit@domain" onChange={(event) => set("dc_user", event.target.value)} />
+                      <Input type="password" value={form.dc_password} placeholder="Пароль, пусто — не менять" autoComplete="new-password" onChange={(event) => set("dc_password", event.target.value)} />
+                      <p className="text-muted-foreground text-xs">{company?.dc_password_set ? t("pass.set") : t("pass.miss")}</p>
+                    </CardContent>
+                  </Card>
+                </div>
                 <Select value={form.directory_mode} onValueChange={(value) => { set("directory_mode", value); set("ldap_port", value === "ldap" ? "389" : "636") }}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -113,9 +127,7 @@ export function Settings() {
                     <SelectItem value="ldap">Каталог: LDAP, порт 389</SelectItem>
                   </SelectContent>
             </Select>
-            <Textarea rows={3} value={form.scan_hosts} placeholder="Дополнительные узлы для аудита ПО" onChange={(event) => set("scan_hosts", event.target.value)} />
-                <Input value={form.notify_email} placeholder="Почта для отчета этой компании" onChange={(event) => set("notify_email", event.target.value)} />
-                <Input value={form.telegram_chat} placeholder="Chat id Telegram этой компании" onChange={(event) => set("telegram_chat", event.target.value)} />
+                <Textarea rows={3} value={form.scan_hosts} placeholder="Дополнительные узлы для аудита ПО" onChange={(event) => set("scan_hosts", event.target.value)} />
                 <Button onClick={() => void saveCompany()}>{t("save")}</Button>
               </AccordionContent>
             </AccordionItem>
@@ -388,7 +400,7 @@ function Scripts() {
     <Card>
       <CardHeader><CardTitle>Сборщик и ловушки</CardTitle></CardHeader>
       <CardContent className="grid gap-3">
-        <p className="text-muted-foreground text-sm">Скрипт сборщика запускают на компьютере, где офицер уже вошел в домен. Он запускает PingCastle и SharpHound на этом компьютере и отправляет XML и архив на сервер. Пароль домена в скрипт не записывается. Это не инвентаризация программ: установленное ПО сервер читает сам, со вкладки «Сканирование». Скрипт ловушек создает непривилегированные приманки и не показывает пароль.</p>
+        <p className="text-muted-foreground text-sm">Скрипт сборщика запускают на компьютере, где офицер уже вошел в домен. Он запускает SharpHound на этом компьютере и отправляет архив на сервер. Пароль домена в скрипт не записывается. Это не инвентаризация программ: установленное ПО сервер читает сам, со вкладки «Сканирование». Скрипт ловушек создает непривилегированные приманки и не показывает пароль.</p>
         <div className="flex flex-wrap gap-2">
           <Button onClick={() => void api<{ script: string }>("/api/collector/script?company_id=" + companyId).then((data) => setCollector(data.script)).catch((error: unknown) => setCollector(error instanceof Error ? error.message : ""))}>Собрать скрипт сборщика</Button>
           <Button variant="outline" onClick={() => void navigator.clipboard.writeText(collector)}>Копировать</Button>

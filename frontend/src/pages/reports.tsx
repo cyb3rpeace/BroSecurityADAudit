@@ -43,7 +43,7 @@ export function Reports() {
       <Card>
         <CardHeader><CardTitle>{t("rep.history")}</CardTitle></CardHeader>
         <CardContent>
-          <p className="text-muted-foreground mb-3 text-sm">Это сохраненные паспорта сканирований выбранной компании. Строка «Отчет PingCastle» появляется только после загрузки XML. Остальные строки — общий паспорт того запуска, а не разница на графиках.</p>
+          <p className="text-muted-foreground mb-3 text-sm">Это сохраненные паспорта сканирований выбранной компании.</p>
           <Table>
             <TableHeader>
               <TableRow>
@@ -58,7 +58,7 @@ export function Reports() {
               {timeline.length ? [...timeline].reverse().map((point) => (
                 <TableRow key={point.scan_id}>
                   <TableCell>{point.when || point.label}</TableCell>
-                  <TableCell>{point.kind === "pingcastle" ? "Отчет PingCastle" : "Паспорт сканирования"}</TableCell>
+                  <TableCell>Паспорт сканирования</TableCell>
                   <TableCell>{point.actor || "—"}</TableCell>
                   <TableCell>{point.score}</TableCell>
                   <TableCell><Button variant="outline" size="sm" onClick={() => window.open("/api/reports/" + point.scan_id, "_blank")}>Открыть</Button></TableCell>

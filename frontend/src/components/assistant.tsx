@@ -2,8 +2,7 @@ import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
+import { PageHead } from "@/components/bits"
 import { api } from "@/lib/api"
 import { useApp } from "@/app-state"
 
@@ -52,9 +51,8 @@ function Markdown({ text }: { text: string }) {
   return <div className="grid gap-1">{blocks}</div>
 }
 
-export function Assistant() {
+export function AssistantPage() {
   const { t, companyId } = useApp()
-  const [open, setOpen] = useState(false)
   const [text, setText] = useState("")
   const [log, setLog] = useState<Bubble[]>([{ kind: "bot", text: t("ai.hello") }])
 
@@ -78,26 +76,19 @@ export function Assistant() {
   }
 
   return (
-    <>
-      <Button className="fixed right-4 bottom-4 z-30 size-12 rounded-full" onClick={() => setOpen(true)}>AI</Button>
-      <Sheet open={open} onOpenChange={setOpen}>
-        <SheetContent className="flex w-full flex-col sm:max-w-md">
-          <SheetHeader><SheetTitle>{t("ai.title")}</SheetTitle></SheetHeader>
-          <ScrollArea className="min-h-0 flex-1 pr-3">
-            <div className="grid gap-2">
-              {log.map((item, index) => (
-                <Card key={index} className={item.kind === "user" ? "ml-8" : "mr-8"}>
-                  <CardContent className="text-sm">{item.kind === "bot" ? <Markdown text={item.text} /> : item.text}</CardContent>
-                </Card>
-              ))}
-            </div>
-          </ScrollArea>
-          <form className="flex gap-2" onSubmit={(event) => void ask(event)}>
-            <Input value={text} placeholder={t("ai.ph")} onChange={(event) => setText(event.target.value)} />
-            <Button type="submit">{t("ai.ask")}</Button>
-          </form>
-        </SheetContent>
-      </Sheet>
-    </>
+    <div className="mx-auto grid max-w-3xl gap-4">
+      <PageHead title={t("ai.title")} sub="Спросите про открытые находки выбранной компании. Ответ остаётся в этой вкладке." />
+      <div className="grid gap-3">
+        {log.map((item, index) => item.kind === "user" ? (
+          <div key={index} className="bg-muted ml-auto max-w-[80%] rounded-2xl px-4 py-2 text-sm">{item.text}</div>
+        ) : (
+          <Card key={index}><CardContent className="pt-4 text-sm"><Markdown text={item.text} /></CardContent></Card>
+        ))}
+      </div>
+      <form className="flex gap-2" onSubmit={(event) => void ask(event)}>
+        <Input value={text} placeholder={t("ai.ph")} onChange={(event) => setText(event.target.value)} />
+        <Button type="submit">{t("ai.ask")}</Button>
+      </form>
+    </div>
   )
 }

@@ -106,7 +106,7 @@ export function Incidents() {
             </TableHeader>
             <TableBody>
               {slice.length ? slice.map((row) => (
-                <TableRow key={row.id} className="cursor-pointer" onClick={() => void openFinding(row.vuln_id)}>
+                <TableRow key={row.id} className="cursor-pointer" onClick={() => void openFinding(row)}>
                   <TableCell>{row.detected_at}</TableCell>
                   <TableCell>
                     <div className="font-medium">{row.title}</div>

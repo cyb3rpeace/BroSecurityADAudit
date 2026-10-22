@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { PageHead } from "@/components/bits"
+import { ScanProgress, type ScanProgressData } from "@/components/scan-progress"
 import { api } from "@/lib/api"
 import type { ScanRow } from "@/lib/types"
 import { useApp } from "@/app-state"
@@ -33,6 +34,21 @@ const DAYS = [
   ["sun", "Вс"],
 ] as const
 
+function queuedProgress(ids: string[]): ScanProgressData {
+  return {
+    elapsed_sec: 0,
+    status: "ожидание",
+    modules: MODULES.filter(([id]) => ids.includes(id)).map(([id, label]) => ({
+      id,
+      title: label.split(" · ")[0],
+      state: "wait" as const,
+      note: "ждёт запуска",
+      at: "",
+    })),
+    hosts: null,
+  }
+}
+
 function readSchedule(raw: string | undefined) {
   if (raw === "daily") return { days: DAYS.map((row) => row[0]), time: "02:00" }
   const match = (raw || "").match(/^((?:mon|tue|wed|thu|fri|sat|sun)(?:,(?:mon|tue|wed|thu|fri|sat|sun))*)@(\d{2}:\d{2})$/)
@@ -41,19 +57,27 @@ function readSchedule(raw: string | undefined) {
 }
 
 export function Scan() {
-  const { t, company, companyId, scheduler, reload } = useApp()
+  const { t, company, companyId, scheduler, reload, watchScan, live } = useApp()
   const initial = readSchedule(company?.schedule)
   const [picked, setPicked] = useState<string[]>(MODULES.map((row) => row[0]))
   const [days, setDays] = useState<string[]>(initial.days)
   const [time, setTime] = useState(initial.time)
   const [enabled, setEnabled] = useState(company?.scheduler_enabled ? "true" : "false")
   const [log, setLog] = useState(scheduler?.label || "")
+  const [progress, setProgress] = useState<ScanProgressData | null>(null)
   const [busy, setBusy] = useState(false)
   const [history, setHistory] = useState<ScanRow[]>([])
 
   useEffect(() => {
     if (!companyId) return
-    void api<ScanRow[]>("/api/scans?company_id=" + companyId).then(setHistory).catch(() => setHistory([]))
+    void api<ScanRow[]>("/api/scans?company_id=" + companyId).then((rows) => {
+      setHistory(rows)
+      const latest = rows[0]
+      if (!latest || busy) return
+      void api<{ status: string; summary: string; progress: ScanProgressData | null }>("/api/scans/" + latest.id)
+        .then((scan) => { if (scan.progress) setProgress(scan.progress) })
+        .catch(() => undefined)
+    }).catch(() => setHistory([]))
   }, [companyId, busy])
 
   useEffect(() => {
@@ -81,9 +105,11 @@ export function Scan() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ company_id: companyId, domain_controller: company?.dc_host || "", modules: picked }),
       })
+      watchScan(started.scan_id)
       const watch = async () => {
-        const scan = await api<{ status: string; summary: string }>("/api/scans/" + started.scan_id)
-        setLog(scan.status + "\n" + (scan.summary || ""))
+        const scan = await api<{ status: string; summary: string; progress: ScanProgressData | null }>("/api/scans/" + started.scan_id)
+        if (scan.progress) setProgress(scan.progress)
+        setLog(scan.summary || scan.status)
         if (scan.status === "queued" || scan.status === "running") {
           window.setTimeout(() => void watch(), 2000)
         } else {
@@ -155,9 +181,12 @@ export function Scan() {
             </Select>
             <Button variant="outline" onClick={() => void saveSchedule()}>{t("sch.save")}</Button>
           </div>
-          {log ? <pre className="bg-muted overflow-auto rounded-lg p-3 text-xs whitespace-pre-wrap">{log}</pre> : null}
+          {log ? <p className="text-muted-foreground text-xs whitespace-pre-wrap">{log}</p> : null}
         </CardContent>
       </Card>
+      <div className="mt-4">
+        <ScanProgress data={live || progress || queuedProgress(picked)} />
+      </div>
       <Card className="mt-4">
         <CardHeader><CardTitle>{t("scan.history")}</CardTitle></CardHeader>
         <CardContent>

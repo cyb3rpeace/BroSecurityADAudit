@@ -30,7 +30,7 @@ export function Paths() {
       <PageHead title={t("path.title")} sub={t("path.sub")} />
       <div className="grid gap-3">
         {rows.length ? rows.map((row) => (
-          <Card key={row.id} className="cursor-pointer" onClick={() => void openFinding(row.vuln_id)}>
+          <Card key={row.id} className="cursor-pointer" onClick={() => void openFinding(row)}>
             <CardHeader className="flex-row items-center justify-between">
               <CardTitle>{row.title}</CardTitle>
               <Severity row={row} theme={theme} />

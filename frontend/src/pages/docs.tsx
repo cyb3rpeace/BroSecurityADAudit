@@ -6,6 +6,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { PageHead } from "@/components/bits"
 import type { WikiItem } from "@/lib/types"
+import { KNOWLEDGE, type KnowledgeArticle } from "@/lib/knowledge"
 import { useApp } from "@/app-state"
 
 function loadWiki() {
@@ -27,17 +28,18 @@ declare global {
 
 const DOCS = {
   ru: [
-    ["start", "С чего начать", "Каталог читает Linux по LDAP или LDAPS. PingCastle и SharpHound ставятся на любой Windows-компьютер в домене: Windows Server 2019 или рабочая станция офицера безопасности. На контроллер их ставить не обязательно. Настрой LDAP/LDAPS, установи BloodHound и PingCastle и приступай к сканированию!"],
+    ["start", "С чего начать", "Каталог читает Linux по LDAP или LDAPS. SharpHound ставится на любой Windows-компьютер в домене. На контроллер его ставить не обязательно. Настрой LDAP/LDAPS, установи BloodHound и приступай к сканированию!"],
     ["ldap", "Каталог: LDAPS 636 и простой LDAP 389", "В настройках укажите DNS-имя контроллера и служебную учетную запись этого же домена. Формат DOMAIN\\user или user@domain. Права администратора домена не нужны, достаточно чтения. LDAPS 636 — если на контроллере есть сертификат. LDAP 389 — обычный канал без шифрования, только внутри доверенной сети. Гигиена, доверия и типы шифрования Kerberos идут этим каналом."],
-    ["pc", "Как установить PingCastle", "На Windows-хосте возьмите последний zip с PingCastle.exe из выпусков Netwrix. Распакуйте в C:\\Tools\\PingCastle. Запуск: PingCastle.exe --healthcheck --server ИМЯ-КОНТРОЛЛЕРА. Пароль в командную строку не кладите. XML загружается в пункт меню PingCastle."],
+    ["areas", "Области аудита", "Учетные записи: пароли, блокировка, служебные записи, точечные политики. Устройства: устаревшие ОС, пароль компьютера, покрытие LAPS без чтения пароля, пустые подразделения. Пути: делегирование, SPN, шаблоны сертификатов, только признаки. Группы: пустые, слишком большие и слишком глубоко вложенные, без списка участников. DNS: имя зоны, без разбора двоичных записей. Разбор каждого параметра GPO, живые события входа и характеристики железа в продукт не входят."],
     ["sh", "Как установить SharpHound", "Возьмите SharpHound.exe из выпусков SpecterOps той же ветки, что понимает BloodHound CE. Распакуйте в C:\\Tools\\SharpHound. Сбор: SharpHound.exe -c DCOnly,Session,LocalAdmin,CA --zipfilename brosec --nosavecache. Хеши и билеты не выгружаются. Zip загружается в пункт меню SharpHound."],
-    ["link", "Как связать программы с сервером", "PingCastle и SharpHound пока запускаются вручную на компьютере, где офицер уже вошел в домен, и загружаются со своих страниц. Отдельный Windows-хост для них в настройках не задается: удаленный запуск этих программ вернется вместе с Velociraptor. Реестр, время, SYSVOL и установленные программы сервер читает по WinRM. Значение cpassword не расшифровывается. Сборщик в настройках не содержит пароль домена."],
+    ["link", "Как связать программу с сервером", "SharpHound запускается вручную на компьютере, где офицер уже вошел в домен, и загружается со своей страницы. Реестр, время, SYSVOL и установленные программы сервер читает по WinRM. Значение cpassword не расшифровывается. Сборщик в настройках не содержит пароль домена."],
     ["mail", "Почта, Telegram и ассистент", "Суперадминистратор задает SMTP и бота Telegram. Пароль и токен обратно в браузер не возвращаются. После сканирования уходят письмо и сообщение, если каналы настроены. Модель ассистента подключается адресом в формате OpenAI, путь заканчивается на /v1."],
   ],
   en: [
-    ["start", "Start here", "The directory is read from Linux over LDAP or LDAPS. PingCastle and SharpHound run on any domain-joined Windows host. Set LDAP or LDAPS, install BloodHound and PingCastle, and start the scan."],
+    ["start", "Start here", "The directory is read from Linux over LDAP or LDAPS. SharpHound runs on any domain-joined Windows host. Set LDAP or LDAPS, install BloodHound, and start the scan."],
     ["ldap", "LDAP 389 and LDAPS 636", "A domain read account is enough. Use DOMAIN\\user or user@domain. Pick LDAPS 636 when the controller has a certificate. Pick plain LDAP 389 only on a trusted network."],
-    ["tools", "Install and connect the tools", "Unzip PingCastle and SharpHound to C:\\Tools. Either point WinRM at that Windows host, or build the collector in Settings and run it there. The script does not contain the domain password. Upload the XML and the zip from their menu pages."],
+    ["areas", "Audit areas", "Accounts, devices, delegation, groups, and DNS zone names. Group member lists and binary DNS records stay out of the report. Full GPO diffs, live logon events, and hardware inventory are not part of the product."],
+    ["tools", "Install SharpHound", "Unzip SharpHound to C:\\Tools. Run it on a computer where you are already signed in to the domain and upload the zip from the SharpHound page. The collector script does not contain the domain password."],
   ],
 } as const
 
@@ -58,46 +60,53 @@ function sevClass(sev: string) {
 }
 
 export function Docs() {
-  const { t, lang, inventory } = useApp()
+  const { t, lang, setView } = useApp()
   const [items, setItems] = useState<WikiItem[]>([])
   const [query, setQuery] = useState("")
   const [group, setGroup] = useState("all")
   const [open, setOpen] = useState<string[]>(["start"])
   const [card, setCard] = useState<WikiItem | null>(null)
+  const [article, setArticle] = useState<KnowledgeArticle | null>(null)
+  const [copied, setCopied] = useState("")
 
   useEffect(() => {
     void loadWiki().then(setItems)
   }, [])
 
-  const foundRules = useMemo(() => {
-    const ids = new Set<string>()
-    const pattern = /\b(?:pc:)?([ASPT]-[A-Za-z0-9_-]+)\b/g
-    for (const row of inventory) {
-      const blob = [row.title, row.detail, row.tags, row.vuln_id].join(" ")
-      for (const match of blob.matchAll(pattern)) ids.add(match[1])
-    }
-    return ids
-  }, [inventory])
+  const articles = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    return KNOWLEDGE.filter((item) => !q || [item.id, item.title, item.what, item.why, item.impact, item.letter].join(" ").toLowerCase().includes(q))
+  }, [query])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
-    return items.filter((item) => {
-      if (item.g === "pingcastle" && (!item.id || !foundRules.has(item.id))) return false
-      return (group === "all" || item.g === group) && (!q || [item.id, item.title, item.text, item.family, item.what, item.impact, item.fix].join(" ").toLowerCase().includes(q))
-    })
-  }, [foundRules, group, items, query])
+    return items.filter((item) => item.g !== "pingcastle" && (group === "all" || item.g === group) && (!q || [item.id, item.title, item.text, item.family, item.what, item.impact, item.fix].join(" ").toLowerCase().includes(q)))
+  }, [group, items, query])
 
-  const families = ["Устаревшее", "Привилегии", "Аномалии", "Доверия"]
   const docs = DOCS[lang]
 
   return (
     <div>
       <PageHead title={t("nav.docs")} sub={t("docs.lead")} />
+      <Button className="mb-4" variant="secondary" onClick={() => setView("notes")}>Примечания к обновлению</Button>
       <div className="mb-4 flex flex-wrap gap-2">
         <Button variant="outline" onClick={() => setOpen(docs.map((row) => row[0]))}>Развернуть все</Button>
         <Button variant="outline" onClick={() => setOpen([])}>Свернуть все</Button>
         <Input className="max-w-sm" value={query} placeholder="Поиск по справочнику: SMB, LDAP, GPO..." onChange={(event) => setQuery(event.target.value)} />
       </div>
+      <section className="mb-6 grid gap-2">
+        <h2 className="text-base font-medium">База знаний</h2>
+        <p className="text-muted-foreground text-sm">Разбор проверки: что это, зачем так сделано, чем кончается и текст, который можно отправить администраторам. Команд в разборе нет. Это первая волна, остальные проверки справочника дополняются следующими версиями.</p>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {articles.map((item) => (
+            <button key={item.id} type="button" className="hover:bg-muted/50 rounded-lg border p-3 text-left" onClick={() => { setArticle(item); setCopied("") }}>
+              <div className="text-sm font-medium">{item.title}</div>
+              <p className="text-muted-foreground mt-1 line-clamp-2 text-xs">{item.what}</p>
+            </button>
+          ))}
+        </div>
+        {!articles.length ? <p className="text-muted-foreground text-sm">В базе знаний по этому запросу ничего нет.</p> : null}
+      </section>
       <Accordion type="multiple" value={open} onValueChange={setOpen} className="mb-6">
         {docs.map(([id, title, text]) => (
           <AccordionItem key={id} value={id}>
@@ -110,7 +119,6 @@ export function Docs() {
         <TabsList>
           <TabsTrigger value="all">{t("all")}</TabsTrigger>
           <TabsTrigger value="platform">Наши проверки</TabsTrigger>
-          <TabsTrigger value="pingcastle">PingCastle</TabsTrigger>
           <TabsTrigger value="bloodhound">BloodHound</TabsTrigger>
         </TabsList>
       </Tabs>
@@ -120,24 +128,6 @@ export function Docs() {
             {["platform", "bloodhound"].filter((key) => group === "all" || group === key).map((key) => (
               <WikiBlock key={key} title={key === "platform" ? "Проверки платформы" : "BloodHound"} items={filtered.filter((item) => item.g === key)} onOpen={setCard} />
             ))}
-            {(group === "all" || group === "pingcastle") && !filtered.some((item) => item.g === "pingcastle") ? (
-              <p className="text-muted-foreground mt-3 text-sm">Правила PingCastle появятся после загрузки отчета и только по найденным проблемам.</p>
-            ) : null}
-            {(group === "all" || group === "pingcastle") && filtered.some((item) => item.g === "pingcastle") ? (
-              <Accordion type="single" collapsible>
-                <AccordionItem value="pc">
-                  <AccordionTrigger>PingCastle · {filtered.filter((item) => item.g === "pingcastle").length}</AccordionTrigger>
-                  <AccordionContent>
-                    <p className="mb-3">Здесь только те правила PingCastle, которые нашлись в загруженном отчете. Полный каталог из сотен проверок в справочник не выгружается. 30 баллов и выше — критический уровень, 15–29 — высокий, 5–14 — средний, меньше 5 — низкий.</p>
-                    {families.map((family) => {
-                      const part = filtered.filter((item) => item.g === "pingcastle" && item.family === family)
-                      if (!part.length) return null
-                      return <WikiBlock key={family} title={family} items={part} onOpen={setCard} />
-                    })}
-                  </AccordionContent>
-                </AccordionItem>
-              </Accordion>
-            ) : null}
           </>
         )}
         {!filtered.length ? <p className="text-muted-foreground text-sm">В справочнике ничего не найдено.</p> : null}
@@ -163,6 +153,36 @@ export function Docs() {
             <h3 className="text-sm font-medium">Как исправить</h3>
             <p className="text-sm">{card?.fix || card?.text}</p>
           </section>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={!!article} onOpenChange={(next) => { if (!next) setArticle(null) }}>
+        <DialogContent className="max-h-[85vh] overflow-auto sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>{article?.title}</DialogTitle>
+            <DialogDescription>{article?.id}</DialogDescription>
+          </DialogHeader>
+          {article ? (
+            <div className="grid gap-4 text-sm">
+              <section><h3 className="font-medium">Что это</h3><p className="text-muted-foreground">{article.what}</p></section>
+              <section><h3 className="font-medium">Зачем это существует</h3><p>{article.why}</p></section>
+              <section><h3 className="font-medium">Чем кончается</h3><p>{article.impact}</p></section>
+              <section>
+                <h3 className="font-medium">Что передать в работу</h3>
+                <ol className="mt-1 list-decimal space-y-1 pl-5">{article.defense.map((line) => <li key={line}>{line}</li>)}</ol>
+              </section>
+              <section className="grid gap-2">
+                <h3 className="font-medium">Письмо администраторам</h3>
+                <p className="bg-muted rounded-lg p-3 whitespace-pre-wrap">{article.letter}</p>
+                <Button variant="outline" onClick={() => { void navigator.clipboard.writeText(article.letter).then(() => setCopied(article.id)) }}>
+                  {copied === article.id ? "Скопировано" : "Скопировать текст письма"}
+                </Button>
+              </section>
+              <section className="grid gap-1">
+                <h3 className="font-medium">Источники</h3>
+                {article.links.map((link) => <a key={link.href} className="text-primary underline" href={link.href} target="_blank" rel="noreferrer">{link.title}</a>)}
+              </section>
+            </div>
+          ) : null}
         </DialogContent>
       </Dialog>
     </div>

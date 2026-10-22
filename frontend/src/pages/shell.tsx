@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react"
-import { Bell, BookOpen, FileText, LayoutDashboard, Menu, Monitor, Radar, Settings, Siren, Upload, Users, Waypoints, Archive } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
+import { Bell, BookOpen, Bot, FileText, LayoutDashboard, Menu, Monitor, Network, Palette, Radar, Settings, Siren, Sparkles, Users, Waypoints, Archive } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -16,14 +16,19 @@ import { Paths } from "@/pages/paths"
 import { Reports } from "@/pages/reports"
 import { Docs } from "@/pages/docs"
 import { Scan } from "@/pages/scan"
-import { PingCastle, SharpHound } from "@/pages/collectors"
+import { SharpHound } from "@/pages/collectors"
 import { Settings as SettingsPage } from "@/pages/settings"
 import { Notices } from "@/pages/notices"
-import { Assistant } from "@/components/assistant"
+import { AssistantPage } from "@/components/assistant"
+import { FindingCard } from "@/components/finding-card"
+import { Notes } from "@/pages/notes"
+import { Catalog } from "@/pages/catalog"
+import { RELEASES } from "@/lib/releases"
 
 const NAV: { group: string; items: { id: View; icon: typeof LayoutDashboard }[] }[] = [
   { group: "nav.g.overview", items: [
     { id: "overview", icon: LayoutDashboard },
+    { id: "catalog", icon: Network },
     { id: "incidents", icon: Siren },
     { id: "accounts", icon: Users },
     { id: "paths", icon: Waypoints },
@@ -31,50 +36,25 @@ const NAV: { group: string; items: { id: View; icon: typeof LayoutDashboard }[] 
     { id: "reports", icon: FileText },
   ] },
   { group: "nav.g.manual", items: [
-    { id: "pingcastle", icon: Upload },
     { id: "sharphound", icon: Archive },
   ] },
   { group: "nav.g.platform", items: [
     { id: "scan", icon: Radar },
-    { id: "docs", icon: BookOpen },
-    { id: "settings", icon: Settings },
+    { id: "assistant", icon: Bot },
   ] },
 ]
 
-const CHANGELOG = {
-  ru: [
-    "Расписание сканирования задается днями недели и временем.",
-    "Гигиена каталога дополнительно читает квоту компьютеров, делегирование, политику паролей, историю SID, режим домена и соседние признаки. Билеты и хеши не запрашиваются.",
-    "Справочник показывает уровень риска. Правила PingCastle появляются только по найденным в отчете проблемам.",
-    "Названия выпусков Windows больше не теряют русские буквы.",
-    "Версия продукта теперь видна при входе. Это окно показывается один раз для каждой версии.",
-    "История сканирований: когда и кем запущена проверка, в том числе по расписанию.",
-    "В настройках журнал аудита: входы в консоль и изменения настроек. Пароли туда не пишутся.",
-    "Колокольчик показывает непрочитанные события: конец сканирования и загрузка отчетов.",
-    "Настройки сворачиваются. Суперадминистратор может удалить компанию и пользователя.",
-    "Блок «что исчезло» сравнивает только два отчета PingCastle. Живые графики показывают текущий каталог.",
-    "Живой статус каталога внизу меню: зеленый, если домен из настроек отвечает.",
-    "Справочник PingCastle открывается карточками: что проверяется, на что влияет и как исправить.",
-    "Настрой LDAP/LDAPS, установи BloodHound и PingCastle и приступай к сканированию!",
-  ],
-  en: [
-    "The product version is shown at sign-in. This window appears once for each version.",
-    "Scan history records when a check ran and who started it, including the schedule.",
-    "Settings has an audit log of console sign-ins and setting changes. Passwords are not stored there.",
-    "The bell counts unread events: a finished scan and an uploaded report.",
-    "Settings sections collapse. A superadmin can delete a company and a user.",
-    "The appeared and disappeared lists compare two PingCastle reports only. Live charts show the current directory.",
-    "The directory status sits at the bottom of the menu and turns green when the configured domain answers.",
-    "PingCastle reference cards explain the check, the impact, and the fix.",
-    "Set LDAP or LDAPS, install BloodHound and PingCastle, and start the scan.",
-  ],
-} as const
+const PINNED: { id: View; icon: typeof BookOpen }[] = [
+  { id: "docs", icon: BookOpen },
+  { id: "settings", icon: Settings },
+]
 
 export function Shell() {
   const app = useApp()
   const version = app.me?.version || "2.1.0"
   const [menu, setMenu] = useState(false)
   const [bell, setBell] = useState(false)
+  const [deliveryTick, setDeliveryTick] = useState(0)
   const [welcome, setWelcome] = useState(false)
   useEffect(() => {
     if (app.me && localStorage.getItem("brosec-welcome") !== version) setWelcome(true)
@@ -83,6 +63,7 @@ export function Shell() {
   const unread = app.notices.filter((row) => !row.read).length
   const pages: Record<View, React.ReactNode> = {
     overview: <Overview />,
+    catalog: <Catalog />,
     incidents: <Incidents />,
     accounts: <Accounts />,
     paths: <Paths />,
@@ -90,10 +71,11 @@ export function Shell() {
     reports: <Reports />,
     docs: <Docs />,
     scan: <Scan />,
-    pingcastle: <PingCastle />,
     sharphound: <SharpHound />,
-    notices: <Notices />,
+    notices: <Notices deliveryTick={deliveryTick} />,
     settings: <SettingsPage />,
+    assistant: <AssistantPage />,
+    notes: <Notes />,
   }
 
   function choose(view: View) {
@@ -132,6 +114,17 @@ export function Shell() {
           </div>
         ))}
       </ScrollArea>
+      <div className="bg-muted/50 mt-2 grid gap-1 rounded-xl border p-1">
+        {PINNED.map((item) => {
+          const Icon = item.icon
+          return (
+            <Button key={item.id} variant={app.view === item.id ? "secondary" : "ghost"} className="w-full justify-start" onClick={() => choose(item.id)}>
+              <Icon />
+              {app.t("nav." + item.id)}
+            </Button>
+          )
+        })}
+      </div>
       <DomainStatus />
     </div>
   )
@@ -159,9 +152,11 @@ export function Shell() {
               <Bell />
               {unread ? <span className="absolute -top-1 -right-1 grid min-w-5 place-items-center rounded-full bg-red-500 px-1 text-[10px] text-white">{unread}</span> : null}
             </Button>
-            {(["dark", "light", "cyber"] as Theme[]).map((theme) => (
-              <Button key={theme} size="sm" variant={app.theme === theme ? "secondary" : "outline"} onClick={() => app.setTheme(theme)}>{app.t("theme." + theme)}</Button>
-            ))}
+            <Button variant="outline" size="icon" aria-label="Доставка уведомлений" onClick={() => { setDeliveryTick((value) => value + 1); choose("notices") }}>
+              <Settings className="size-4" />
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => choose("assistant")}><Sparkles />{app.t("nav.assistant")}</Button>
+            <ThemePalette />
             <Select value={app.lang} onValueChange={(value) => app.setLang(value as "ru" | "en")}>
               <SelectTrigger className="w-16"><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -175,17 +170,31 @@ export function Shell() {
         </header>
         <main className="p-3 pb-16 md:p-5">{pages[app.view]}</main>
       </div>
+      {app.view !== "scan" && (app.liveStatus === "running" || app.liveStatus === "queued") && app.live ? (
+        <button type="button" className="bg-card fixed right-4 bottom-4 z-40 w-80 rounded-xl border p-3 text-left" onClick={() => app.setView("scan")}>
+          <div className="text-sm font-medium">Сканирование идёт</div>
+          <div className="text-muted-foreground mt-1 text-xs">
+            {(app.live.modules || []).find((item) => item.state === "now")?.title || "В очереди"}
+            {app.live.hosts ? " · " + app.live.hosts.seen + " из " + app.live.hosts.total : ""}
+          </div>
+          <div className="text-muted-foreground mt-1 text-[11px]">Открыть вкладку сканирования</div>
+        </button>
+      ) : null}
       <Sheet open={menu} onOpenChange={setMenu}>
         <SheetContent side="left" className="w-72">
           <SheetHeader><SheetTitle>BroSec Audit AD</SheetTitle></SheetHeader>
           {nav}
         </SheetContent>
       </Sheet>
-      <Assistant />
       <Sheet open={bell} onOpenChange={setBell}>
         <SheetContent className="w-full sm:max-w-md">
           <SheetHeader>
-            <SheetTitle>{app.t("nav.notices")}{unread ? " · " + unread : ""}</SheetTitle>
+            <SheetTitle className="flex items-center gap-2">
+              {app.t("nav.notices")}{unread ? " · " + unread : ""}
+              <Button variant="outline" size="icon" className="ml-auto size-8" aria-label="Доставка" onClick={() => { setDeliveryTick((value) => value + 1); choose("notices") }}>
+                <Settings className="size-4" />
+              </Button>
+            </SheetTitle>
           </SheetHeader>
           <div className="grid gap-2 px-4">
             <Button variant="outline" className="h-auto w-full whitespace-normal" onClick={() => void app.markAllNotices()}>{app.t("bell.read")}</Button>
@@ -209,47 +218,61 @@ export function Shell() {
           </ScrollArea>
         </SheetContent>
       </Sheet>
-      <Dialog open={!!app.remedy} onOpenChange={(open) => { if (!open) app.closeFinding() }}>
-        <DialogContent className="max-h-[85vh] overflow-auto sm:max-w-2xl">
+      <Dialog open={!!app.focus} onOpenChange={(open) => { if (!open) app.closeFinding() }}>
+        <DialogContent className="max-h-[85vh] overflow-auto sm:max-w-3xl">
           <DialogHeader>
-            <DialogTitle>{app.remedy?.title}</DialogTitle>
-            <DialogDescription>{app.remedy?.cis} · {app.remedy?.gost}</DialogDescription>
+            <DialogTitle>{app.focus?.title}</DialogTitle>
+            <DialogDescription>{app.focus?.category}</DialogDescription>
           </DialogHeader>
-          <p className="text-sm">{app.remedy?.mitre} · {app.remedy?.tactic} · {app.remedy?.technique}</p>
-          <p className="text-sm">{app.remedy?.impact} {app.remedy?.closure}</p>
-          <p className="text-sm">{app.remedy?.summary}</p>
-          <ol className="list-decimal space-y-1 pl-4 text-sm">
-            {(app.remedy?.steps || []).map((stepText) => <li key={stepText}>{stepText}</li>)}
-          </ol>
-          <pre className="bg-muted overflow-auto rounded-lg p-3 text-xs whitespace-pre-wrap">{app.remedy?.powershell}</pre>
-          <DialogFooter>
-            <Button onClick={() => void navigator.clipboard.writeText(app.remedy?.powershell || "")}>{app.t("copy.ps")}</Button>
-          </DialogFooter>
+          {app.focus ? <FindingCard finding={app.focus} remedy={app.remedy} /> : null}
         </DialogContent>
       </Dialog>
       <Dialog open={welcome} onOpenChange={(open) => { if (!open) closeWelcome() }}>
         <DialogContent className="max-h-[85vh] overflow-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <span className="relative flex size-2.5 shrink-0" aria-hidden="true">
-                <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-70" />
-                <span className="relative inline-flex size-2.5 rounded-full bg-emerald-500" />
-              </span>
-              <span className="animate-pulse" aria-hidden="true">⚠️</span>
-              BroSec Audit AD {version}
+              <span className="animate-pulse text-xl" aria-hidden="true">⚠️</span>
+              Последние обновления
             </DialogTitle>
-            <DialogDescription>
-              {app.lang === "en" ? "What changed in this version." : "Что изменилось в этой версии."}
-            </DialogDescription>
+            <DialogDescription>BroSec Audit AD {version}</DialogDescription>
           </DialogHeader>
           <ul className="list-disc space-y-2 pl-4 text-sm">
-            {CHANGELOG[app.lang].map((line) => <li key={line}>{line}</li>)}
+            {(app.lang === "en" ? RELEASES[0].en : RELEASES[0].ru).map((line) => <li key={line}>{line}</li>)}
           </ul>
           <DialogFooter>
+            <Button variant="outline" onClick={() => { closeWelcome(); choose("notes") }}>Посмотреть все обновления</Button>
             <Button onClick={closeWelcome}>{app.t("welcome.close")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  )
+}
+
+function ThemePalette() {
+  const app = useApp()
+  const [open, setOpen] = useState(false)
+  const box = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    function close(event: MouseEvent) {
+      if (!box.current?.contains(event.target as Node)) setOpen(false)
+    }
+    document.addEventListener("mousedown", close)
+    return () => document.removeEventListener("mousedown", close)
+  }, [])
+  return (
+    <div className="relative" ref={box}>
+      <Button variant="outline" size="icon" aria-label="Тема" onClick={() => setOpen((value) => !value)}><Palette /></Button>
+      {open ? (
+        <div className="bg-popover absolute right-0 z-40 mt-2 w-44 rounded-lg border p-1">
+          {(["dark", "light", "cyber"] as Theme[]).map((theme) => (
+            <Button key={theme} variant={app.theme === theme ? "secondary" : "ghost"} className="w-full justify-start" onClick={() => { app.setTheme(theme); setOpen(false) }}>
+              <span className={"size-3 rounded-full " + (theme === "dark" ? "bg-zinc-700" : theme === "light" ? "bg-white ring-1 ring-zinc-300" : "bg-pink-500")} />
+              {app.t("theme." + theme)}
+            </Button>
+          ))}
+        </div>
+      ) : null}
     </div>
   )
 }
