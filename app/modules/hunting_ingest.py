@@ -45,7 +45,9 @@ def collection_provenance(metadata, sources):
     """
     from urllib.parse import unquote
     known = {'host': 'Host', 'processes': 'Processes', 'network': 'Network',
-             'services': 'Services', 'tasks': 'Tasks', 'startup': 'Startup'}
+             'services': 'Services', 'tasks': 'Tasks', 'startup': 'Startup',
+             'linux_services': 'LinuxServices', 'linux_crontab': 'LinuxCrontab',
+             'linux_suid': 'LinuxSUID'}
     warnings = []
     contract = metadata.get('CollectionContract') if isinstance(metadata, dict) else None
     if not isinstance(contract, dict):

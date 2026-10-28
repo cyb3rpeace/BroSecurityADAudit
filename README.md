@@ -203,3 +203,7 @@ Enable-NetFirewallRule -Name WINRM-HTTP-In-TCP
 ## 🔒 Чего в репозитории нет
 
 Результатов сканирования, базы, сертификатов, паролей домена, токенов почты, Telegram и ключей модели. Не добавляйте их в коммиты.
+
+### Linux collector coverage update (2026-10-28)
+
+Optional Linux profile sources now include fixed-path cron files and systemd service/timer definitions (1000 rows per source; first 64 KiB per regular file with an explicit truncation flag), and SUID/SGID metadata in `/usr/bin`, `/usr/sbin`, `/bin`, `/sbin`. No command execution or full disk scan. This is evidence collection, not complete Linux DFIR or automatic detection coverage. Root privileges may be needed for protected paths. Missing or empty sources do not establish absence of compromise. Saved profiles can be deleted in the UI without deleting collected archives.

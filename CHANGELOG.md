@@ -1,5 +1,13 @@
 ## Deployment improvements — 2026-10-28
 
+## Collector coverage update — 2026-10-28
+
+- Added fixed-path Linux cron and systemd service/timer configuration collection (1000 rows, 64 KiB per file, truncation flag), plus SUID/SGID metadata for system bin/sbin directories. No shell commands, recursive disk scan or file uploads.
+- Verified an actual encrypted Velociraptor archive through the application ingestion path. Additional Linux sources provide raw evidence, not full automatic detection coverage.
+- Added tenant-scoped saved profile deletion with confirmation and audit logging. Collected evidence is retained.
+- Corrected Windows startup catalog status to match existing builder support. Other Windows candidates remain gated pending execution checks.
+- Validation: 217 regression tests, one skipped; TypeScript/Vite production build and lint of changed UI files passed.
+
 - Added `install.sh` for one-command Linux x86-64 installation with Docker/Compose validation, random session secret, readiness waits and idempotent configuration.
 - Default Compose now starts API and Threat Hunting worker with persistent named volumes; removed production-specific container names, certificate paths and network names.
 - Added first-run TLS creation, random administrator credentials, secure file permissions and worker startup ordering.

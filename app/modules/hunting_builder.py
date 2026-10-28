@@ -72,13 +72,40 @@ LIMIT 10000'''),
 }
 # Candidate artifact names and parameter schemas must be verified against the
 # installed Velociraptor version before they are admitted to compilation.
-SUPPORTED = BASE_SUPPORTED | frozenset(PERSISTENCE_QUERIES)
 QUERIES = {
     'host': ('Host', 'SELECT Hostname, Fqdn, OS, Platform, Architecture FROM info()'),
     'processes': ('Processes', 'SELECT Pid, Ppid, Name, Exe, Username, CommandLine, CreateTime FROM pslist() LIMIT 10000'),
     'network': ('Network', 'SELECT * FROM netstat() LIMIT 20000'),
 }
+LINUX_SOURCES = {'linux_services': 'LinuxServices', 'linux_crontab': 'LinuxCrontab', 'linux_suid': 'LinuxSUID'}
+# Fixed local paths only: no command execution, recursive filesystem walk or uploads.
+# Read at most 64 KiB per regular file; retain truncation evidence.
+def linux_config_query(paths):
+    return '''SELECT OSPath, Size, Mtime, format(format="%s", args=Mode) AS Mode,
+       read_file(filename=OSPath, length=65536) AS Content,
+       Size > 65536 AS ContentTruncated
+FROM glob(globs=__PATHS__)
+WHERE NOT IsDir AND NOT IsLink AND Size >= 0
+LIMIT 1000'''.replace('__PATHS__', json.dumps(paths))
 
+LINUX_QUERIES = {
+    'linux_services': ('LinuxServices', linux_config_query([
+        '/etc/systemd/system/*.service', '/etc/systemd/system/*.timer',
+        '/etc/systemd/system/*.service.d/*.conf', '/usr/lib/systemd/system/*.service',
+        '/usr/lib/systemd/system/*.timer', '/lib/systemd/system/*.service',
+        '/lib/systemd/system/*.timer'])),
+    'linux_crontab': ('LinuxCrontab', linux_config_query([
+        '/etc/crontab', '/etc/cron.d/*', '/var/spool/cron/*',
+        '/var/spool/cron/crontabs/*', '/etc/cron.hourly/*',
+        '/etc/cron.daily/*', '/etc/cron.weekly/*', '/etc/cron.monthly/*'])),
+    'linux_suid': ('LinuxSUID', '''SELECT OSPath, Size, Mtime, format(format="%s", args=Mode) AS Mode,
+       Sys.Uid AS OwnerID, Sys.Gid AS GroupID
+FROM glob(globs=["/usr/bin/*", "/usr/sbin/*", "/bin/*", "/sbin/*"])
+WHERE NOT IsDir AND NOT IsLink AND format(format="%s", args=Mode) =~ "^[ug]"
+LIMIT 10000'''),
+}
+
+SUPPORTED = BASE_SUPPORTED | frozenset(PERSISTENCE_QUERIES) | frozenset(LINUX_QUERIES)
 
 def certificate_info(pem: str):
     from cryptography import x509
@@ -116,7 +143,7 @@ def validate_compiled_config(config: dict, profile: dict) -> None:
     if not baseline or not collector:
         raise ValueError('Отсутствует baseline или Collector artifact')
     expected_sources = {'host': 'Host', 'processes': 'Processes', 'network': 'Network',
-                        'services': 'Services', 'tasks': 'Tasks', 'startup': 'Startup'}
+                        'services': 'Services', 'tasks': 'Tasks', 'startup': 'Startup', **LINUX_SOURCES}
     sources = baseline.get('sources')
     if not isinstance(sources, list) or {item.get('name') for item in sources} != {expected_sources[item] for item in profile['artifacts'] if item in expected_sources}:
         raise ValueError('Список baseline sources не соответствует профилю')
@@ -134,7 +161,7 @@ def compile_config(profile: dict, public_certificate: str):
     if not re.fullmatch(r'[A-Za-z0-9_-]{1,120}', campaign_id):
         raise ValueError('Некорректный идентификатор кампании')
     validate_profile(profile['platform'], profile['artifacts'], profile['timeout_seconds'], profile['event_days'])
-    supported = BASE_SUPPORTED | PERSISTENCE_QUERIES.keys() if profile['platform'] == 'windows' else BASE_SUPPORTED
+    supported = (BASE_SUPPORTED | PERSISTENCE_QUERIES.keys()) if profile['platform'] == 'windows' else (BASE_SUPPORTED | LINUX_QUERIES.keys())
     unsupported = sorted(set(profile['artifacts']) - supported)
     if unsupported:
         raise ValueError('Упаковка этих сборов ещё не проверена: ' + ', '.join(unsupported))
@@ -143,7 +170,7 @@ def compile_config(profile: dict, public_certificate: str):
     pem, fingerprint = certificate_info(public_certificate)
     artifact_name = 'BroSec.Offline.Baseline'
     platform = profile['platform']
-    definitions = QUERIES | PERSISTENCE_QUERIES
+    definitions = QUERIES | PERSISTENCE_QUERIES | LINUX_QUERIES
     artifact = {
         'name': artifact_name, 'type': 'CLIENT',
         'description': 'Read-only bounded baseline. Row limits may truncate evidence.',

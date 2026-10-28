@@ -4137,6 +4137,17 @@ def hunting_campaign_action(campaign_id: str, action: str, company_id: int, user
     return JSONResponse(result, headers={"Cache-Control": "no-store"})
 
 
+@app.delete("/api/threat-hunting/profiles/{profile_id}")
+def hunting_profile_delete(profile_id: str, company_id: int, user: User = Depends(get_user), db: Session = Depends(get_db)):
+    company = resolve_company(user, db, company_id)
+    deleted = hunting_profiles.delete_profile(hunting_store(), company.id, profile_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Профиль не найден")
+    write_audit(db, user, "hunting_profile_delete", f"profile={profile_id}", company.id)
+    db.commit()
+    return {"deleted": True, "id": profile_id}
+
+
 @app.post("/api/threat-hunting/profiles/{profile_id}/package")
 def hunting_package(profile_id: str, payload: HuntingBuildIn, user: User = Depends(get_user), db: Session = Depends(get_db)):
     import io

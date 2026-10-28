@@ -72,5 +72,14 @@ class HuntingProfilesTests(unittest.TestCase):
         self.assertEqual(len(hp.list_profiles(self.base, 1)), 100)
 
 
+    def test_delete_profile_is_tenant_scoped_and_idempotent(self):
+        row = self.create()
+        self.assertFalse(hp.delete_profile(self.base, 2, row["id"]))
+        self.assertIsNotNone(hp.get_profile(self.base, 1, row["id"]))
+        self.assertTrue(hp.delete_profile(self.base, 1, row["id"]))
+        self.assertFalse(hp.delete_profile(self.base, 1, row["id"]))
+        self.assertIsNone(hp.get_profile(self.base, 1, row["id"]))
+
+
 if __name__ == '__main__':
     unittest.main()

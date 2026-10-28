@@ -34,7 +34,7 @@ class HuntingApiTests(unittest.TestCase):
                      Form=__import__('fastapi').Form, File=__import__('fastapi').File, UploadFile=__import__('fastapi').UploadFile, hashlib=__import__('hashlib'), BaseModel=BaseModel, Field=Field, Path=Path, User=object, Session=object, Company=object,
                      get_user=get_user, get_db=get_db, hunting_profiles=hunting_profiles,
                      BASE_DIR=Path(self.tmp.name), write_audit=lambda *args: None)
-        names = {'resolve_company', 'HuntingProfileIn', 'hunting_store', 'hunting_external_worker_enabled', 'hunting_catalog', 'hunting_list', 'hunting_create', 'hunting_spec', 'HuntingConfigIn', 'hunting_compile', 'HuntingBuildIn', 'hunting_package', 'hunting_import', 'hunting_history', 'hunting_result_delete', 'hunting_rows', 'hunting_analysis'}
+        names = {'resolve_company', 'HuntingProfileIn', 'hunting_store', 'hunting_external_worker_enabled', 'hunting_catalog', 'hunting_list', 'hunting_create', 'hunting_spec', 'HuntingConfigIn', 'hunting_compile', 'HuntingBuildIn', 'hunting_package', 'hunting_import', 'hunting_history', 'hunting_result_delete', 'hunting_profile_delete', 'hunting_rows', 'hunting_analysis'}
         source = Path(__file__).resolve().parents[1] / 'app' / 'main.py'
         tree = ast.parse(source.read_text(encoding='utf-8'))
         nodes = [n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.ClassDef)) and n.name in names]
@@ -179,6 +179,15 @@ class HuntingApiTests(unittest.TestCase):
         for delta in [{'platform': 'linux', 'artifacts': ['services']}, {'artifacts': ['host', 'host']}, {'timeout_seconds': 0}, {'name': ' '}]:
             self.assertEqual(self.client.post('/api/threat-hunting/profiles', json={**self.payload, **delta}).status_code, 422)
         self.assertEqual(self.client.get('/api/threat-hunting/profiles/missing/spec?company_id=1').status_code, 404)
+
+
+    def test_delete_profile_authorization_and_success(self):
+        self.login()
+        row = self.client.post("/api/threat-hunting/profiles", json=self.payload).json()
+        url = "/api/threat-hunting/profiles/" + row["id"]
+        self.assertEqual(self.client.delete(url + "?company_id=2").status_code, 403)
+        self.assertEqual(self.client.delete(url + "?company_id=1").status_code, 200)
+        self.assertEqual(self.client.delete(url + "?company_id=1").status_code, 404)
 
 
 if __name__ == '__main__':

@@ -11,9 +11,12 @@ CATALOG = [
     {"id": "host", "title": "Сведения об ОС", "platforms": ["windows", "linux"], "source": "Host", "status": "analysis_supported", "max_rows": 1, "privacy": "low", "note": "Имя узла, версия и архитектура ОС."},
     {"id": "processes", "title": "Процессы", "platforms": ["windows", "linux"], "source": "Processes", "status": "analysis_supported", "max_rows": 10000, "privacy": "high", "note": "Снимок процессов; командные строки могут содержать чувствительные данные."},
     {"id": "network", "title": "Сетевые соединения", "platforms": ["windows", "linux"], "source": "Network", "status": "analysis_supported", "max_rows": 20000, "privacy": "high", "note": "Моментальный снимок, не история сетевой активности."},
+    {"id": "linux_services", "title": "Службы Linux", "platforms": ["linux"], "source": "LinuxServices", "status": "collection_supported", "max_rows": 1000, "privacy": "high", "note": "Фиксированные systemd service/timer и drop-in пути: до 1000 файлов, первые 64 КиБ; без запуска systemctl. Не инвентарь активных служб."},
+    {"id": "linux_crontab", "title": "Cron и планировщик Linux", "platforms": ["linux"], "source": "LinuxCrontab", "status": "collection_supported", "max_rows": 1000, "privacy": "high", "note": "Системные и пользовательские crontab, cron-скрипты: до 1000 файлов, первые 64 КиБ. Содержимое может включать секреты; усечение отмечается."},
+    {"id": "linux_suid", "title": "SUID/SGID-файлы", "platforms": ["linux"], "source": "LinuxSUID", "status": "collection_supported", "max_rows": 10000, "privacy": "moderate", "note": "Метаданные SUID/SGID только /usr/bin, /usr/sbin, /bin, /sbin; не полный обход диска. Содержимое не выгружается."},
     {"id": "services", "title": "Службы", "platforms": ["windows"], "source": "Services", "status": "analysis_supported", "max_rows": 10000, "privacy": "high", "note": "Состояние и конфигурация служб Windows."},
     {"id": "tasks", "title": "Задания планировщика", "platforms": ["windows"], "source": "Tasks", "status": "analysis_supported", "max_rows": 10000, "privacy": "high", "note": "Действия и учётные записи задач; аргументы могут содержать секреты."},
-    {"id": "startup", "title": "Автозапуск", "platforms": ["windows"], "source": "Startup", "status": "candidate", "max_rows": 10000, "privacy": "moderate", "note": "Run-ключи и папки автозагрузки; покрытие пользовательских ульев ограничено."},
+    {"id": "startup", "title": "Автозапуск", "platforms": ["windows"], "source": "Startup", "status": "analysis_supported", "max_rows": 10000, "privacy": "moderate", "note": "Нормализованный снимок Run-ключей и папок автозагрузки; покрытие пользовательских ульев ограничено."},
     {"id": "accounts", "title": "Локальные пользователи и администраторы", "platforms": ["windows"], "source": "Accounts", "status": "candidate", "max_rows": 2000, "privacy": "moderate", "note": "Метаданные локальных записей и Administrators, без обхода доменных групп."},
     {"id": "security_events", "title": "События безопасности", "platforms": ["windows"], "source": "SecurityEvents", "status": "candidate", "max_rows": 50000, "privacy": "high", "note": "Нормализованная выборка Security за ограниченное окно, только утверждённые event IDs."},
     {"id": "powershell_events", "title": "События PowerShell", "platforms": ["windows"], "source": "PowerShellEvents", "status": "candidate", "max_rows": 25000, "privacy": "high", "note": "Операционные события PowerShell; ScriptBlock может содержать чувствительные данные."},
@@ -95,6 +98,16 @@ def create_profile(base, company_id, name, platform, artifacts, timeout_seconds,
 def list_profiles(base, company_id):
     with connection(base) as db:
         return [json.loads(x[0]) for x in db.execute("SELECT body FROM profiles WHERE company_id=? ORDER BY created_at DESC LIMIT 100", (company_id,))]
+
+def delete_profile(base, company_id, profile_id):
+    if not isinstance(profile_id, str) or not profile_id or len(profile_id) > 120:
+        return False
+    with connection(base) as db:
+        row = db.execute("SELECT body FROM profiles WHERE company_id=? AND id=?", (company_id, profile_id)).fetchone()
+        if row is None:
+            return False
+        db.execute("DELETE FROM profiles WHERE company_id=? AND id=?", (company_id, profile_id))
+    return True
 
 def get_profile(base, company_id, profile_id):
     with connection(base) as db:
