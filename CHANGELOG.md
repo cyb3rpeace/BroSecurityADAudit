@@ -1,3 +1,11 @@
+## 2.6.25 — 2026-10-28
+
+- Added a shared 90,000-row normalized-source profile budget with a 10,000-row reserve below the importer cap; enforced server-side and shown in the UI. Legacy duplicate built-ins remain outside this guarantee.
+- Saved-profile deletion now archives immutable configuration for existing campaigns; hidden profiles cannot be used for new standalone packages. Campaign package generation verifies the profile matches the campaign.
+- Hardened Linux fixed-path evidence collection and corrected SUID ownership metadata with installed-engine regression tests. Linked parent directories and wildcard drop-in paths are skipped; this is a snapshot check, not an atomic no-follow read against concurrent filesystem changes.
+- Added reviewed Windows account, WMI and Run/RunOnce wrapper query definitions with explicit output projections. These remain execution-unverified and gated: no claims of real Windows collection or event analysis coverage.
+- Windows event metadata stays gated pending real EVTX/Windows execution. No raw EventData, SAM hashes or unbounded built-in duplicate collection added.
+
 ## Deployment improvements — 2026-10-28
 
 ## Collector coverage update — 2026-10-28

@@ -11,9 +11,9 @@ CATALOG = [
     {"id": "host", "title": "Сведения об ОС", "platforms": ["windows", "linux"], "source": "Host", "status": "analysis_supported", "max_rows": 1, "privacy": "low", "note": "Имя узла, версия и архитектура ОС."},
     {"id": "processes", "title": "Процессы", "platforms": ["windows", "linux"], "source": "Processes", "status": "analysis_supported", "max_rows": 10000, "privacy": "high", "note": "Снимок процессов; командные строки могут содержать чувствительные данные."},
     {"id": "network", "title": "Сетевые соединения", "platforms": ["windows", "linux"], "source": "Network", "status": "analysis_supported", "max_rows": 20000, "privacy": "high", "note": "Моментальный снимок, не история сетевой активности."},
-    {"id": "linux_services", "title": "Службы Linux", "platforms": ["linux"], "source": "LinuxServices", "status": "collection_supported", "max_rows": 1000, "privacy": "high", "note": "Фиксированные systemd service/timer и drop-in пути: до 1000 файлов, первые 64 КиБ; без запуска systemctl. Не инвентарь активных служб."},
+    {"id": "linux_services", "title": "Службы Linux", "platforms": ["linux"], "source": "LinuxServices", "status": "collection_supported", "max_rows": 1000, "privacy": "high", "note": "Фиксированные systemd service/timer пути: до 1000 файлов, первые 64 КиБ; без systemctl. Drop-in и каталоги-ссылки пропускаются. Не инвентарь активных служб."},
     {"id": "linux_crontab", "title": "Cron и планировщик Linux", "platforms": ["linux"], "source": "LinuxCrontab", "status": "collection_supported", "max_rows": 1000, "privacy": "high", "note": "Системные и пользовательские crontab, cron-скрипты: до 1000 файлов, первые 64 КиБ. Содержимое может включать секреты; усечение отмечается."},
-    {"id": "linux_suid", "title": "SUID/SGID-файлы", "platforms": ["linux"], "source": "LinuxSUID", "status": "collection_supported", "max_rows": 10000, "privacy": "moderate", "note": "Метаданные SUID/SGID только /usr/bin, /usr/sbin, /bin, /sbin; не полный обход диска. Содержимое не выгружается."},
+    {"id": "linux_suid", "title": "SUID/SGID-файлы", "platforms": ["linux"], "source": "LinuxSUID", "status": "collection_supported", "max_rows": 10000, "privacy": "moderate", "note": "Метаданные SUID/SGID и числовые UID/GID только /usr/bin, /usr/sbin, /bin, /sbin; каталоги-ссылки пропускаются. Не полный обход диска; без содержимого."},
     {"id": "services", "title": "Службы", "platforms": ["windows"], "source": "Services", "status": "analysis_supported", "max_rows": 10000, "privacy": "high", "note": "Состояние и конфигурация служб Windows."},
     {"id": "tasks", "title": "Задания планировщика", "platforms": ["windows"], "source": "Tasks", "status": "analysis_supported", "max_rows": 10000, "privacy": "high", "note": "Действия и учётные записи задач; аргументы могут содержать секреты."},
     {"id": "startup", "title": "Автозапуск", "platforms": ["windows"], "source": "Startup", "status": "analysis_supported", "max_rows": 10000, "privacy": "moderate", "note": "Нормализованный снимок Run-ключей и папок автозагрузки; покрытие пользовательских ульев ограничено."},
@@ -36,6 +36,19 @@ for _item in CATALOG:
                      note='Экспериментальные метаданные EVTX: UTC-окно до LIMIT; без Message/EventData/ScriptBlock. Исполнение Windows не проверено; упаковка запрещена.')
 
 
+MAX_PROFILE_ROWS = 90000  # Reserve 10000 rows below the importer hard cap.
+
+
+def profile_row_budget(artifacts):
+    """Budget wrapper output only; legacy duplicate built-ins are not bounded."""
+    selected = set(artifacts)
+    total = sum(item['max_rows'] for item in CATALOG if item['id'] in selected)
+    return {'configured_rows': total, 'maximum_rows': MAX_PROFILE_ROWS,
+            'importer_maximum_rows': 100000, 'reserved_rows': 10000,
+            'within_budget': total <= MAX_PROFILE_ROWS,
+            'scope': 'normalized_source_output_not_legacy_builtin_scan_or_bytes'}
+
+
 def collection_contract(profile):
     """Configured coverage, never a claim that a source succeeded or was complete."""
     selected = set(profile['artifacts'])
@@ -45,6 +58,7 @@ def collection_contract(profile):
         'collector_schema': 'brosec.result.v1',
         'capture_clock': 'endpoint_utc',
         'configured_source_row_limits': rows,
+        'row_budget': profile_row_budget(profile['artifacts']),
         'timeout_seconds': profile['timeout_seconds'],
         'event_window': {
             'requested_days': profile['event_days'],
@@ -66,6 +80,8 @@ def validate_profile(platform, artifacts, timeout_seconds, event_days):
     allowed = {x["id"] for x in CATALOG if platform in x["platforms"]}
     if not artifacts or len(artifacts) != len(set(artifacts)) or not set(artifacts) <= allowed:
         raise ValueError("Выберите неповторяющиеся сборы, совместимые с ОС")
+    if not profile_row_budget(artifacts)['within_budget']:
+        raise ValueError("Суммарный лимит источников превышает 90000 строк; разделите сбор на профили")
     if (type(timeout_seconds) is not int or type(event_days) is not int
             or not 60 <= timeout_seconds <= 3600 or not 1 <= event_days <= 30):
         raise ValueError("Лимит времени: 60–3600 секунд; окно событий: 1–30 дней")
@@ -97,7 +113,7 @@ def create_profile(base, company_id, name, platform, artifacts, timeout_seconds,
 
 def list_profiles(base, company_id):
     with connection(base) as db:
-        return [json.loads(x[0]) for x in db.execute("SELECT body FROM profiles WHERE company_id=? ORDER BY created_at DESC LIMIT 100", (company_id,))]
+        return [json.loads(x[0]) for x in db.execute("SELECT body FROM profiles WHERE company_id=? AND json_extract(body, '$.deleted_at') IS NULL ORDER BY created_at DESC LIMIT 100", (company_id,))]
 
 def delete_profile(base, company_id, profile_id):
     if not isinstance(profile_id, str) or not profile_id or len(profile_id) > 120:
@@ -106,13 +122,20 @@ def delete_profile(base, company_id, profile_id):
         row = db.execute("SELECT body FROM profiles WHERE company_id=? AND id=?", (company_id, profile_id)).fetchone()
         if row is None:
             return False
-        db.execute("DELETE FROM profiles WHERE company_id=? AND id=?", (company_id, profile_id))
+        # Keep the immutable configuration for campaigns already holding this id.
+        body = json.loads(row[0])
+        if body.get('deleted_at'):
+            return False
+        body['deleted_at'] = datetime.now(timezone.utc).isoformat()
+        db.execute("UPDATE profiles SET body=? WHERE company_id=? AND id=?",
+                   (json.dumps(body, ensure_ascii=False), company_id, profile_id))
     return True
 
-def get_profile(base, company_id, profile_id):
+def get_profile(base, company_id, profile_id, include_deleted=False):
     with connection(base) as db:
         row = db.execute("SELECT body FROM profiles WHERE company_id=? AND id=?", (company_id, profile_id)).fetchone()
-    return json.loads(row[0]) if row else None
+    body = json.loads(row[0]) if row else None
+    return body if body and (include_deleted or not body.get('deleted_at')) else None
 
 def export_spec(profile):
     return {"schema": "brosec.offline-profile.v1", "profile_id": profile["id"],

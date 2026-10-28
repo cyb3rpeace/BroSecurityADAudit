@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 
-type Artifact = { id: string; title: string; platforms: string[]; note: string; status?: string }
+type Artifact = { id: string; title: string; platforms: string[]; note: string; status?: string; max_rows?: number }
 type Profile = { id: string; name: string; platform: string; artifacts: string[]; timeout_seconds: number; event_days: number }
 type Tab = "overview" | "profiles" | "campaigns" | "dashboard" | "imports"
 type Section = "hq" | "investigations" | "analytics" | "collection"
@@ -102,6 +102,7 @@ function TenantHunting({ companyId, section }: { companyId: number | null; secti
   }, [companyId])
 
   const availableArtifacts = useMemo(() => catalog.filter(a => a.platforms.includes(platform)), [catalog, platform])
+  const selectedRowBudget = catalog.filter(a => picked.includes(a.id)).reduce((sum, a) => sum + (a.max_rows || 0), 0)
   async function save() {
     if (!companyId) return
     const target = companyId
@@ -114,7 +115,7 @@ function TenantHunting({ companyId, section }: { companyId: number | null; secti
     finally { setBusy(false) }
   }
   async function removeProfile(profile: Profile) {
-    if (!companyId || !window.confirm(`Удалить профиль «${profile.name}»? Это не удалит уже собранные архивы.`)) return
+    if (!companyId || !window.confirm(`Удалить профиль «${profile.name}»? Профиль будет скрыт из списка. Уже созданные кампании и собранные архивы сохранятся.`)) return
     setBusy(true); setError("")
     try {
       await api(`/api/threat-hunting/profiles/${profile.id}?company_id=${companyId}`, { method: "DELETE" })
@@ -182,7 +183,8 @@ function TenantHunting({ companyId, section }: { companyId: number | null; secti
         <div className="grid gap-3 sm:grid-cols-2"><label className="text-sm">Название<Input value={name} maxLength={120} onChange={e => setName(e.target.value)} /></label><label className="text-sm">ОС<select className="mt-1 block w-full rounded border bg-background p-2" value={platform} onChange={e => { setPlatform(e.target.value); setPicked(["host", "processes", "network"]) }}><option value="windows">Windows</option><option value="linux">Linux</option></select></label></div>
         <div className="grid gap-2 sm:grid-cols-3">{availableArtifacts.map(a => <label key={a.id} className="flex gap-2 rounded-lg border p-3 text-sm"><input type="checkbox" disabled={a.status === "candidate"} checked={picked.includes(a.id)} onChange={e => setPicked(e.target.checked ? [...picked, a.id] : picked.filter(x => x !== a.id))} /><span><strong>{a.title}</strong>{a.status === "candidate" && <span className="ml-2 text-xs text-amber-500">Ещё не доступно для сборки</span>}<span className="mt-1 block text-xs text-muted-foreground">{a.note}</span></span></label>)}</div>
         <div className="flex flex-wrap gap-3"><label className="text-sm">Время, сек.<Input type="number" min={60} max={3600} value={timeout} onChange={e => setTimeout(Number(e.target.value))} /></label><label className="text-sm">Окно событий, дней (для будущих event-профилей)<Input type="number" min={1} max={30} value={days} onChange={e => setDays(Number(e.target.value))} /></label></div>
-        <Button disabled={busy || !companyId || !name.trim() || !picked.length || timeout < 60 || timeout > 3600 || days < 1 || days > 30} onClick={() => void save()}>{busy ? "Сохранение…" : "Сохранить профиль"}</Button>
+        <p className="text-xs text-muted-foreground" role="status">Лимит нормализованных источников: {selectedRowBudget.toLocaleString("ru-RU")} / 90 000 строк. Лимит не гарантирует полноту сбора и не ограничивает объём чтения.</p>
+        <Button disabled={busy || selectedRowBudget > 90000 || !companyId || !name.trim() || !picked.length || timeout < 60 || timeout > 3600 || days < 1 || days > 30} onClick={() => void save()}>{busy ? "Сохранение…" : "Сохранить профиль"}</Button>
       </CardContent></Card>
       <section><div className="mb-2 flex items-center justify-between"><h2 className="text-lg font-semibold">Сохранённые профили</h2><span className="text-sm text-muted-foreground">{profiles.length}</span></div>{profiles.length === 0 ? <p className="rounded-xl border p-4 text-sm text-muted-foreground">Пока нет профилей.</p> : profiles.map(p => <div key={p.id} className="mb-2 flex flex-wrap items-center justify-between gap-3 rounded-xl border p-3"><div><strong>{p.name}</strong><p className="text-xs text-muted-foreground">{p.platform} · {p.artifacts.length} сбора · {p.timeout_seconds} сек. · {p.event_days} дн.</p></div><div className="flex gap-2"><a className="self-center text-xs underline" href={`/api/threat-hunting/profiles/${p.id}/spec?company_id=${companyId}`}>JSON</a><Button size="sm" disabled={busy || !buildPlatforms.includes(p.platform) || p.artifacts.some(a => !(p.platform === "windows" ? ["host", "processes", "network", "services", "tasks", "startup"] : ["host", "processes", "network", "linux_services", "linux_crontab", "linux_suid"]).includes(a))} onClick={() => void build(p)}>{busy ? "Создание…" : "Скачать сборщик"}</Button><Button size="sm" variant="outline" disabled={busy} onClick={() => void removeProfile(p)}>Удалить</Button></div></div>)}</section>
     </>}

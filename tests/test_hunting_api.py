@@ -100,6 +100,21 @@ class HuntingApiTests(unittest.TestCase):
             self.user = None
             self.assertEqual(self.client.post(url,json={'company_id':1}).status_code,401)
 
+    def test_archived_profile_package_requires_matching_existing_campaign(self):
+        from unittest.mock import patch
+        self.login()
+        row = self.client.post('/api/threat-hunting/profiles', json=self.payload).json()
+        url = '/api/threat-hunting/profiles/' + row['id']
+        self.assertEqual(self.client.delete(url + '?company_id=1').status_code, 200)
+        with patch('app.modules.hunting_runtime.trusted_tools', return_value=(None,None,'a','b')), patch('app.modules.hunting_packager.build_package', return_value=(b'test-binary', {'executable_sha256':'abc'})), patch('app.modules.hunting_campaigns.get_campaign') as campaign:
+            self.assertEqual(self.client.post(url + '/package', json={'company_id':1}).status_code, 404)
+            campaign.return_value = {'profile_id': row['id']}
+            self.assertEqual(self.client.post(url + '/package', json={'company_id':1, 'campaign_id':'a'*32}).status_code, 200)
+            campaign.return_value = {'profile_id': 'different'}
+            self.assertEqual(self.client.post(url + '/package', json={'company_id':1, 'campaign_id':'a'*32}).status_code, 409)
+            campaign.return_value = None
+            self.assertEqual(self.client.post(url + '/package', json={'company_id':1, 'campaign_id':'a'*32}).status_code, 404)
+
     def test_import_auth_and_summary(self):
         from unittest.mock import patch
         url = '/api/threat-hunting/import'

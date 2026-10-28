@@ -79,30 +79,58 @@ QUERIES = {
 }
 LINUX_SOURCES = {'linux_services': 'LinuxServices', 'linux_crontab': 'LinuxCrontab', 'linux_suid': 'LinuxSUID'}
 # Fixed local paths only: no command execution, recursive filesystem walk or uploads.
-# Read at most 64 KiB per regular file; retain truncation evidence.
+def _linux_safe_glob(paths):
+    """Reject intermediate wildcard components and linked literal directories.
+
+    /lib and /bin aliases are deliberately skipped when linked; their /usr
+    counterparts are separately enumerated. This is a snapshot check, not an
+    atomic no-follow open against concurrent filesystem replacement.
+    """
+    queries = []
+    for path in paths:
+        parts = path.split('/')
+        if not path.startswith('/') or any(c in part for part in parts[1:-1] for c in '*?[]{}'):
+            raise ValueError('Linux collection requires literal parent directories')
+        parents = ['/' + '/'.join(parts[1:i]) for i in range(2, len(parts))]
+        checks = [f'(stat(filename={json.dumps(parent)}, accessor="file").IsDir AND NOT stat(filename={json.dumps(parent)}, accessor="file").IsLink)' for parent in parents]
+        guard = ' AND '.join(checks) or 'TRUE'
+        queries.append('q%d={SELECT * FROM foreach(row={SELECT * FROM scope() WHERE %s}, query={SELECT * FROM glob(globs=%s, accessor="file")})}' % (len(queries), guard, json.dumps(path)))
+    return 'chain(' + ',\n'.join(queries) + ')'
+
+
 def linux_config_query(paths):
+    # Read only regular files, at most 64 KiB each, with truncation evidence.
     return '''SELECT OSPath, Size, Mtime, format(format="%s", args=Mode) AS Mode,
-       read_file(filename=OSPath, length=65536) AS Content,
+       read_file(filename=OSPath, accessor="file", length=65536) AS Content,
        Size > 65536 AS ContentTruncated
-FROM glob(globs=__PATHS__)
-WHERE NOT IsDir AND NOT IsLink AND Size >= 0
-LIMIT 1000'''.replace('__PATHS__', json.dumps(paths))
+FROM __GLOB__
+WHERE NOT IsDir AND NOT IsLink AND format(format="%s", args=Mode) =~ "^-" AND Size >= 0
+LIMIT 1000'''.replace('__GLOB__', _linux_safe_glob(paths))
+
+
+def linux_suid_query(paths):
+    # glob() has no Sys on the installed engine; stat(file) exposes numeric IDs.
+    return '''SELECT OSPath, Size, Mtime, format(format="%s", args=Mode) AS Mode,
+       stat(filename=OSPath, accessor="file").Sys.Uid AS OwnerID,
+       stat(filename=OSPath, accessor="file").Sys.Gid AS GroupID
+FROM __GLOB__
+WHERE NOT IsDir AND NOT IsLink AND format(format="%s", args=Mode) =~ "^[ug]"
+LIMIT 10000'''.replace('__GLOB__', _linux_safe_glob(paths))
+
 
 LINUX_QUERIES = {
     'linux_services': ('LinuxServices', linux_config_query([
         '/etc/systemd/system/*.service', '/etc/systemd/system/*.timer',
-        '/etc/systemd/system/*.service.d/*.conf', '/usr/lib/systemd/system/*.service',
-        '/usr/lib/systemd/system/*.timer', '/lib/systemd/system/*.service',
-        '/lib/systemd/system/*.timer'])),
+        # Wildcard drop-in directories are intentionally not collected: glob's
+        # final-entry IsLink cannot exclude symlinked intermediate directories.
+        '/usr/lib/systemd/system/*.service', '/usr/lib/systemd/system/*.timer',
+        '/lib/systemd/system/*.service', '/lib/systemd/system/*.timer'])),
     'linux_crontab': ('LinuxCrontab', linux_config_query([
         '/etc/crontab', '/etc/cron.d/*', '/var/spool/cron/*',
         '/var/spool/cron/crontabs/*', '/etc/cron.hourly/*',
         '/etc/cron.daily/*', '/etc/cron.weekly/*', '/etc/cron.monthly/*'])),
-    'linux_suid': ('LinuxSUID', '''SELECT OSPath, Size, Mtime, format(format="%s", args=Mode) AS Mode,
-       Sys.Uid AS OwnerID, Sys.Gid AS GroupID
-FROM glob(globs=["/usr/bin/*", "/usr/sbin/*", "/bin/*", "/sbin/*"])
-WHERE NOT IsDir AND NOT IsLink AND format(format="%s", args=Mode) =~ "^[ug]"
-LIMIT 10000'''),
+    'linux_suid': ('LinuxSUID', linux_suid_query([
+        '/usr/bin/*', '/usr/sbin/*', '/bin/*', '/sbin/*'])),
 }
 
 SUPPORTED = BASE_SUPPORTED | frozenset(PERSISTENCE_QUERIES) | frozenset(LINUX_QUERIES)
@@ -173,7 +201,7 @@ def compile_config(profile: dict, public_certificate: str):
     definitions = QUERIES | PERSISTENCE_QUERIES | LINUX_QUERIES
     artifact = {
         'name': artifact_name, 'type': 'CLIENT',
-        'description': 'Read-only bounded baseline. Row limits may truncate evidence.',
+        'description': 'Read-only bounded baseline. Row limits may truncate evidence. Linux skips symlinked parent directories and systemd drop-ins; checks are not atomic against concurrent path replacement.',
         'precondition': "SELECT OS FROM info() WHERE OS = '" + platform + "'",
         'sources': [{'name': definitions[a][0], 'query': definitions[a][1]} for a in profile['artifacts'] if a in definitions],
     }
@@ -231,4 +259,10 @@ LET Destination <= format(format="BroSec-%s-%d.zip", args=[Host[0].Hostname, now
                         'Лимиты строк: процессы 10000, соединения 20000',
                         'Синтаксис и выполнение требуют проверки целевой версией Velociraptor'],
     }
+    if platform == 'linux':
+        manifest['limitations'].extend([
+            'Systemd drop-ins are not collected; wildcard parent directories are forbidden',
+            'Symlinked parent directories are skipped, including /lib, /bin and /sbin aliases; explicit /usr paths are queried separately',
+            'Path checks are snapshots, not atomic no-follow opens against concurrent filesystem replacement',
+        ])
     return encoded, manifest

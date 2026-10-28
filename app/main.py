@@ -78,7 +78,7 @@ try:
 except Exception:
     TZ = ZoneInfo("UTC")
 
-PRODUCT_VERSION = "2.6.24"
+PRODUCT_VERSION = "2.6.25"
 
 ALLOWED_MODULES = (
     "ad_cs",
@@ -4156,7 +4156,7 @@ def hunting_package(profile_id: str, payload: HuntingBuildIn, user: User = Depen
     from app.modules.hunting_packager import build_package
     from app.modules.hunting_runtime import trusted_tools
     company = resolve_company(user, db, payload.company_id)
-    row = hunting_profiles.get_profile(hunting_store(), company.id, profile_id)
+    row = hunting_profiles.get_profile(hunting_store(), company.id, profile_id, include_deleted=bool(payload.campaign_id))
     if row is None:
         raise HTTPException(status_code=404, detail="Профиль не найден")
     try:
@@ -4168,6 +4168,8 @@ def hunting_package(profile_id: str, payload: HuntingBuildIn, user: User = Depen
         campaign = get_campaign(hunting_store(), company.id, payload.campaign_id)
         if campaign is None:
             raise HTTPException(status_code=404, detail="Кампания не найдена")
+        if campaign['profile_id'] != profile_id:
+            raise HTTPException(status_code=409, detail="Профиль не соответствует кампании")
         row = {**row, 'campaign_id': payload.campaign_id}
     try:
         data, manifest = build_package(row, hunting_store() / "keys", engine, target, engine_hash, target_hash)
