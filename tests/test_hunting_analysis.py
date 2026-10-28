@@ -140,17 +140,84 @@ class GraphAndIocTests(unittest.TestCase):
         review.consume(PREFIX+'Network.json',1,{'Pid':7,'Status':'ESTABLISHED','RemoteIP':'8.8.8.8','RemotePort':443})
         review.consume(PREFIX+'Network.json',2,{'Status':'ESTABLISHED','RemoteIP':'10.0.0.1'})
         result=review.result([{'source':PREFIX+'Processes.json','rows':1},{'source':PREFIX+'Network.json','rows':2}])
-        self.assertTrue(any(edge['relation']=='network_connection' for edge in result['graph']['edges']))
+        self.assertTrue(any(edge['relation']=='network_connection' for edge in result['context_graph']['edges']))
         ioc=next(item for item in result['iocs'] if item['value']=='8.8.8.8')
         self.assertEqual(ioc['evidence_refs'][0]['row_number'],2)
-        self.assertEqual(result['graph']['nodes'][0]['kind'], 'process')
+        self.assertEqual(result['context_graph']['nodes'][0]['kind'], 'process')
     def test_graph_does_not_link_ambiguous_pid(self):
         review=BaselineReview()
         review.consume(PREFIX+'Processes.json',0,{'Pid':7,'Exe':'/tmp/a'})
         review.consume(PREFIX+'Processes.json',1,{'Pid':7,'Exe':'/tmp/b'})
         review.consume(PREFIX+'Network.json',2,{'Pid':7,'Status':'ESTABLISHED','RemoteIP':'8.8.8.8'})
         result=review.result([])
-        self.assertFalse(any(edge['relation']=='network_connection' for edge in result['graph']['edges']))
+        self.assertFalse(any(edge['relation']=='network_connection' for edge in result['context_graph']['edges']))
+
+class SuspiciousGraphProjectionTests(unittest.TestCase):
+    def test_graph_excludes_benign_processes_and_public_only_endpoints(self):
+        review = BaselineReview()
+        review.consume(PREFIX + 'Host.json', 0, {'Hostname': 'host-a'})
+        review.consume(PREFIX + 'Processes.json', 0, {'Pid': 1, 'Ppid': 0, 'Exe': '/sbin/init'})
+        review.consume(PREFIX + 'Processes.json', 1, {'Pid': 10, 'Ppid': 1, 'Exe': '/usr/bin/python', 'CommandLine': 'python app.py'})
+        review.consume(PREFIX + 'Processes.json', 2, {'Pid': 20, 'Ppid': 1, 'Exe': 'powershell.exe', 'CommandLine': 'powershell.exe -EncodedCommand SQBFAFgAIAAtAG4AbwBwAA=='})
+        review.consume(PREFIX + 'Network.json', 0, {'Pid': 10, 'Status': 'ESTABLISHED', 'RemoteIP': '8.8.8.8', 'RemotePort': 443})
+        review.consume(PREFIX + 'Network.json', 1, {'Pid': 20, 'Status': 'ESTABLISHED', 'RemoteIP': '8.8.4.4', 'RemotePort': 443})
+        result = review.result([])
+        ids = {node['id'] for node in result['graph']['nodes']}
+        self.assertIn('host:scope', ids)
+        self.assertIn('process:20', ids)
+        self.assertIn('endpoint:8.8.4.4:443', ids)
+        self.assertNotIn('process:10', ids)
+        self.assertNotIn('endpoint:8.8.8.8:443', ids)
+        self.assertEqual(result['graph']['scope'], 'suspicious_behavior')
+
+    def test_path_and_public_ip_alone_do_not_enter_focus_graph(self):
+        review = BaselineReview()
+        review.consume(PREFIX + 'Host.json', 0, {'Hostname': 'host-a'})
+        review.consume(PREFIX + 'Processes.json', 0, {'Pid': 10, 'Exe': '/tmp/updater'})
+        review.consume(PREFIX + 'Network.json', 0, {'Pid': 10, 'Status': 'ESTABLISHED', 'RemoteIP': '8.8.8.8'})
+        result = review.result([])
+        self.assertEqual(result['graph']['nodes'], [])
+        self.assertEqual(result['graph']['edges'], [])
+        self.assertTrue(result['context_graph']['nodes'])
+
+    def test_late_signal_survives_baseline_graph_and_evidence_caps(self):
+        review = BaselineReview()
+        for i in range(5100):
+            review.consume(PREFIX + 'Processes.json', i, {'Pid': i + 1, 'Exe': '/usr/bin/benign'})
+        review.consume(PREFIX + 'Processes.json', 5100, {'Pid': 6000, 'Exe': 'powershell.exe', 'CommandLine': 'powershell.exe -EncodedCommand SQBFAFgAIAAtAG4AbwBwAA=='})
+        review.consume(PREFIX + 'Host.json', 0, {'Hostname': 'late-host'})
+        review.consume(PREFIX + 'Network.json', 0, {'Pid': 6000, 'Status': 'ESTABLISHED', 'RemoteIP': '10.0.0.8', 'RemotePort': 4444})
+        result = review.result([])
+        ids = {n['id'] for n in result['graph']['nodes']}
+        self.assertEqual(ids, {'host:scope', 'process:6000', 'endpoint:10.0.0.8:4444'})
+        self.assertFalse(result['graph']['truncated'])
+        self.assertTrue(any(e['relation'] == 'network_connection' for e in result['graph']['edges']))
+
+    def test_startup_signal_is_visible_without_running_process(self):
+        review = BaselineReview()
+        review.consume(PREFIX + 'Host.json', 0, {'Hostname': 'host-a'})
+        review.consume(PREFIX + 'Startup.json', 0, {'Name': 'Entry', 'Details': 'powershell.exe -EncodedCommand SQBFAFgAIAAtAG4AbwBwAA=='})
+        result = review.result([])
+        self.assertIn('persistence.startup_suspicious_invocation', [f['rule_id'] for f in result['findings']])
+        node = next(n for n in result['graph']['nodes'] if n['kind'] == 'persistence')
+        self.assertEqual(node['role'], 'signal')
+        self.assertEqual(node['evidence_refs'][0]['row_number'], 1)
+
+    def test_graph_keeps_suspicious_parent_persistence_endpoint_and_host(self):
+        review = BaselineReview()
+        review.consume(PREFIX + 'Host.json', 0, {'Hostname': 'host-a'})
+        review.consume(PREFIX + 'Processes.json', 0, {'Pid': 4, 'Ppid': 1, 'Exe': r'C:\Windows\System32\svchost.exe'})
+        review.consume(PREFIX + 'Processes.json', 1, {'Pid': 10, 'Ppid': 4, 'Exe': r'C:\Windows\System32\cmd.exe', 'CommandLine': 'cmd.exe /c powershell -enc SQBFAFgA'})
+        review.consume(PREFIX + 'Services.json', 0, {'Name': 'BadSvc', 'PathName': r'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -EncodedCommand SQBFAFgAIAAtAG4AbwBwAA=='})
+        review.consume(PREFIX + 'Network.json', 0, {'Pid': 10, 'Status': 'ESTABLISHED', 'RemoteIP': '8.8.8.8', 'RemotePort': 443})
+        result = review.result([])
+        ids = {node['id'] for node in result['graph']['nodes']}
+        self.assertTrue({'host:scope', 'process:10', 'process:4', 'endpoint:8.8.8.8:443'} <= ids)
+        self.assertTrue(any(node['kind'] == 'persistence' for node in result['graph']['nodes']))
+        relations = {edge['relation'] for edge in result['graph']['edges']}
+        self.assertIn('parent_child', relations)
+        self.assertIn('network_connection', relations)
+        self.assertIn('observed_on', relations)
 
 class HighSignalDetectionTests(unittest.TestCase):
     def test_parent_child_and_public_process_signal(self):
@@ -159,7 +226,7 @@ class HighSignalDetectionTests(unittest.TestCase):
         review.consume(PREFIX+'Processes.json',1,{'Pid':1,'Ppid':0,'Name':'init','Exe':'/sbin/init'})
         review.consume(PREFIX+'Network.json',2,{'Pid':10,'Status':'ESTABLISHED','RemoteIP':'8.8.8.8','RemotePort':443})
         result=review.result([])
-        self.assertTrue(any(e['relation']=='parent_child' for e in result['graph']['edges']))
+        self.assertTrue(any(e['relation']=='parent_child' for e in result['context_graph']['edges']))
         self.assertIn('network.public_peer_with_process',[f['rule_id'] for f in result['findings']])
     def test_private_process_connection_is_not_public_signal(self):
         review=BaselineReview();review.consume(PREFIX+'Processes.json',0,{'Pid':10,'Exe':'/tmp/tool'});review.consume(PREFIX+'Network.json',1,{'Pid':10,'Status':'ESTABLISHED','RemoteIP':'10.0.0.5'})
@@ -180,7 +247,7 @@ class NetworkShapeTests(unittest.TestCase):
     def test_alternate_velociraptor_field_names_create_edges(self):
         review=BaselineReview();review.consume(PREFIX+'Processes.json',0,{'PID':'10','PPid':'1','Exe':'/tmp/tool'});review.consume(PREFIX+'Network.json',1,{'PID':'10','Status':'ESTABLISHED','RemoteAddr':'8.8.8.8','RemotePortNumber':'443'})
         result=review.result([])
-        self.assertTrue(any(e['relation']=='network_connection' for e in result['graph']['edges']))
+        self.assertTrue(any(e['relation']=='network_connection' for e in result['context_graph']['edges']))
         self.assertIn('network.public_peer_with_process',[f['rule_id'] for f in result['findings']])
     def test_null_network_endpoints_do_not_create_ioc(self):
         review=BaselineReview();review.consume(PREFIX+'Network.json',0,{'Pid':10,'Status':'LISTEN','LocalIP':None,'RemoteIP':None});result=review.result([])
@@ -204,7 +271,7 @@ class ContextualDetectionRegressionTests(unittest.TestCase):
         self.assertEqual(evidence['remote_ip'], '8.8.8.8')
         self.assertEqual(evidence['pid'], 1048576)
         self.assertEqual((evidence['process_row_number'], evidence['network_row_number']), (4, 9))
-        self.assertIn({'source': 'process:70000', 'target': 'process:1048576', 'relation': 'parent_child', 'confidence': 'snapshot_pid'}, result['graph']['edges'])
+        self.assertIn({'source': 'process:70000', 'target': 'process:1048576', 'relation': 'parent_child', 'confidence': 'snapshot_pid'}, result['context_graph']['edges'])
         finding = next(f for f in result['findings'] if f['rule_id'] == 'network.public_peer_with_process')
         self.assertEqual(finding['evidence_refs'], [
             {'source': PREFIX + 'Network.json', 'row_number': 9, 'relation': 'rule_match'},
@@ -271,7 +338,7 @@ class ContextualDetectionRegressionTests(unittest.TestCase):
                 self.assertEqual(finding['classification'], 'review')
                 self.assertEqual(finding['evidence_refs'], [{'source': PREFIX + 'Tasks.json', 'row_number': 6, 'relation': 'rule_match'}])
                 self.assertEqual(finding['evidence'].get('Actions', finding['evidence'].get('Arguments')), task.get('Actions', arguments))
-                self.assertTrue(any(e['relation'] == 'executes' for e in result['graph']['edges']))
+                self.assertTrue(any(e['relation'] == 'executes' for e in result['context_graph']['edges']))
                 correlated = next(f for f in result['findings'] if f['rule_id'] == 'correlation.process_persistence')
                 self.assertEqual(correlated['evidence_refs'][1], {'source': PREFIX + 'Processes.json', 'row_number': 9, 'relation': 'executable_path'})
 
@@ -315,7 +382,7 @@ class ContextualDetectionRegressionTests(unittest.TestCase):
         ]:
             with self.subTest(kind=kind, row=row):
                 result = self.analyze([(kind, 0, row), ('Processes', 1, {'Pid': 70000, 'Exe': exe})])
-                self.assertTrue(any(e['relation'] == 'executes' for e in result['graph']['edges']))
+                self.assertTrue(any(e['relation'] == 'executes' for e in result['context_graph']['edges']))
                 self.assertIn('correlation.process_persistence', [f['rule_id'] for f in result['findings']])
                 wrong = self.analyze([(kind, 0, row), ('Processes', 1, {'Pid': 70000, 'Exe': exe + '.evil'})])
                 self.assertFalse(any(e['relation'] == 'executes' for e in wrong['graph']['edges']))
@@ -331,7 +398,7 @@ class ContextualDetectionRegressionTests(unittest.TestCase):
         self.assertNotIn('network.public_peer_with_process', rules)
         self.assertNotIn('correlation.process_network', rules)
         self.assertFalse(result['triage_summary']['process_network_evidence'])
-        self.assertFalse(any(e['relation'] == 'network_connection' for e in result['graph']['edges']))
+        self.assertFalse(any(e['relation'] == 'network_connection' for e in result['context_graph']['edges']))
 
     def test_parent_cycles_self_and_missing_parents_do_not_create_edges(self):
         for processes in [
@@ -342,7 +409,7 @@ class ContextualDetectionRegressionTests(unittest.TestCase):
         ]:
             with self.subTest(processes=processes):
                 result = self.analyze([('Processes', i, row) for i, row in enumerate(processes)])
-                self.assertFalse(any(e['relation'] == 'parent_child' for e in result['graph']['edges']))
+                self.assertFalse(any(e['relation'] == 'parent_child' for e in result['context_graph']['edges']))
 
 if __name__ == '__main__':
     unittest.main()

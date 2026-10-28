@@ -1,50 +1,61 @@
-name: ad-audit
+name: brosec-audit
+
+x-app: &app
+  build: .
+  image: brosec-audit:local
+  env_file: .env
+  environment:
+    HUNTING_EXTERNAL_WORKER: "1"
+  restart: unless-stopped
 
 services:
-  ad-security-core:
-    build: .
-    image: ad-identity-guard:2.0
-    container_name: ad-security-core
-    env_file: .env
-    user: "1000:1000"
+  init:
+    <<: *app
+    restart: "no"
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-ec"]
     command:
-      - uvicorn
-      - app.main:app
-      - --host
-      - 0.0.0.0
-      - --port
-      - "8000"
-      - --proxy-headers
-      - --ssl-certfile
-      - /opt/ad-audit/certs/hidedoc.crt
-      - --ssl-keyfile
-      - /opt/ad-audit/certs/hidedoc.key
-    ports:
-      - "9443:8000"
+      - |
+        mkdir -p /opt/ad-audit/data /opt/ad-audit/reports /opt/ad-audit/certs
+        chown 1000:1000 /opt/ad-audit/data /opt/ad-audit/reports /opt/ad-audit/certs
+        chmod 700 /opt/ad-audit/data /opt/ad-audit/certs
     volumes:
-      - ./data:/opt/ad-audit/data
-      - ./reports:/opt/ad-audit/reports
-      - ./certs/hidedoc.crt:/opt/ad-audit/certs/hidedoc.crt:ro
-      - ./certs/hidedoc.key:/opt/ad-audit/certs/hidedoc.key:ro
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    networks:
-      - audit-net
-    restart: unless-stopped
+      - data:/opt/ad-audit/data
+      - reports:/opt/ad-audit/reports
+      - certs:/opt/ad-audit/certs
+
+  ad-security-core:
+    <<: *app
+    user: "1000:1000"
+    entrypoint: ["/bin/sh", "/opt/ad-audit/docker/entrypoint.sh"]
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    ports:
+      - "${BIND_ADDRESS:-0.0.0.0}:${HTTPS_PORT:-9443}:8000"
+    volumes:
+      - data:/opt/ad-audit/data
+      - reports:/opt/ad-audit/reports
+      - certs:/opt/ad-audit/certs
     healthcheck:
-      test:
-        [
-          "CMD",
-          "python",
-          "-c",
-          "import ssl,urllib.request; ctx=ssl._create_unverified_context(); urllib.request.urlopen('https://127.0.0.1:8000/health/ready', context=ctx, timeout=5)",
-        ]
-      interval: 30s
+      test: ["CMD", "python", "-c", "import ssl,urllib.request; urllib.request.urlopen('https://127.0.0.1:8000/health/ready',context=ssl._create_unverified_context(),timeout=5)"]
+      interval: 5s
       timeout: 8s
-      retries: 5
-      start_period: 25s
+      retries: 24
+      start_period: 20s
 
+  ad-security-pipeline-worker:
+    <<: *app
+    user: "1000:1000"
+    command: ["python", "-m", "app.modules.hunting_pipeline_worker"]
+    depends_on:
+      ad-security-core:
+        condition: service_healthy
+    volumes:
+      - data:/opt/ad-audit/data
+      - reports:/opt/ad-audit/reports
 
-networks:
-  audit-net:
-    name: audit-net
+volumes:
+  data:
+  reports:
+  certs:

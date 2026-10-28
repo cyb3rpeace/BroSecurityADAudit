@@ -1,29 +1,6 @@
-name: ad-audit-worker
-
+# Compatibility override. The default compose already starts the worker.
 services:
   ad-security-pipeline-worker:
-    build: .
-    image: ad-identity-guard:pipeline-worker
-    container_name: ad-security-pipeline-worker
-    env_file: .env
     environment:
-      HUNTING_EXTERNAL_WORKER: "1"
       HUNTING_WORKER_RECOVERY_SECONDS: "60"
       HUNTING_WORKER_STALE_SECONDS: "1800"
-      HUNTING_WORKER_ID: "pipeline-worker-1"
-    user: "1000:1000"
-    command:
-      - python
-      - -m
-      - app.modules.hunting_pipeline_worker
-    volumes:
-      - ./data:/opt/ad-audit/data
-      - ./reports:/opt/ad-audit/reports
-    restart: unless-stopped
-    networks:
-      - audit-net
-
-networks:
-  audit-net:
-    external: true
-    name: audit-net

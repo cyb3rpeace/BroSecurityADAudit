@@ -20,6 +20,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY tools ./tools
 RUN chmod -R a+rX /opt/ad-audit/tools
+COPY docker ./docker
 COPY app ./app
 RUN chmod -R a+rX /opt/ad-audit/app
 

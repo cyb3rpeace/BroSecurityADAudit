@@ -3,8 +3,9 @@ import { ArrowDownToLine, ChevronRight, CircleHelp, FileSearch, GitBranch, Globe
 
 export type HuntingEvidenceRef = { source: string; row_number: number }
 export type HuntingEvidenceGraphData = {
-  nodes: { id: string; kind: string; label: string; evidence_refs?: HuntingEvidenceRef[] }[]
+  nodes: { id: string; kind: string; label: string; role?: string; reason?: string; command_line?: string; signal_rules?: string[]; evidence_refs?: HuntingEvidenceRef[] }[]
   edges: { source: string; target: string; relation: string; confidence: string }[]
+  scope?: string
   truncated: boolean
 }
 export type HuntingEvidenceGraphProps = {
@@ -31,7 +32,7 @@ const kindInfo = (kind: string) => {
     default: return { label: kind || "Другой объект", Icon: CircleHelp, color: "text-muted-foreground" }
   }
 }
-const relationText = (relation: string) => ({ parent_child: "parent_child · родитель → потомок", network_connection: "network_connection · процесс → endpoint", executes: "executes · запускает" })[relation] || relation
+const relationText = (relation: string) => ({ parent_child: "parent_child · родитель → потомок", network_connection: "network_connection · процесс → endpoint", executes: "executes · совпал путь запуска", observed_on: "observed_on · наблюдается на хосте" })[relation] || relation
 const controlClass = "inline-flex h-9 items-center justify-center gap-2 rounded-lg border bg-background px-3 text-xs transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-40"
 
 /** Read-only graph: never infers a host, remote machine identity, or attack verdict. */
@@ -48,9 +49,9 @@ export function HuntingEvidenceGraph({ graph, onEvidence }: HuntingEvidenceGraph
     // Stable ordering, then bounded rendering; supplied arrays are never mutated.
     const unique = new Map<string, NonNullable<HuntingEvidenceGraphData>["nodes"][number]>()
     for (const node of graph?.nodes || []) if (!unique.has(node.id)) unique.set(node.id, node)
-    const ordered = [...unique.values()].sort((a, b) => compare(a.id, b.id))
+    const ordered = [...unique.values()].sort((a, b) => Number(b.role === "signal") - Number(a.role === "signal") || compare(a.id, b.id))
     const needle = query.trim().toLocaleLowerCase()
-    const matched = ordered.filter(node => !needle || `${node.label} ${node.kind} ${node.id} ${(node.evidence_refs || []).map(ref => ref.source).join(" ")}`.toLocaleLowerCase().includes(needle))
+    const matched = ordered.filter(node => !needle || `${node.label} ${node.command_line || ""} ${node.reason || ""} ${node.kind} ${node.id} ${(node.evidence_refs || []).map(ref => ref.source).join(" ")}`.toLocaleLowerCase().includes(needle))
     // Search includes one-hop context, keeping matching nodes ahead of their neighbours.
     const matchIds = new Set(matched.map(node => node.id))
     const contextIds = new Set<string>()
@@ -116,7 +117,7 @@ export function HuntingEvidenceGraph({ graph, onEvidence }: HuntingEvidenceGraph
   }
   return <section className="min-w-0 overflow-hidden rounded-lg border bg-card" aria-label="Граф доказательных связей">
     <header className="flex flex-wrap items-start justify-between gap-3 border-b bg-muted/20 p-4">
-      <div><p className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.18em] text-primary"><GitBranch className="h-4 w-4" aria-hidden="true" /> SNAPSHOT RELATIONSHIPS</p><h3 className="mt-1 text-base font-semibold">Процессы, запуск и сетевые связи</h3><p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground">Отношения из точечного сбора, не хронология и не подтверждение атаки. Endpoint не означает участие удалённого хоста; имя и роль хоста не восстанавливаются по IP.</p></div>
+      <div><p className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.18em] text-primary"><GitBranch className="h-4 w-4" aria-hidden="true" /> BEHAVIORAL EVIDENCE</p><h3 className="mt-1 text-base font-semibold">Подозрительные действия и связанные объекты</h3><p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground">Отношения из точечного сбора, не хронология и не подтверждение атаки. Endpoint не означает участие удалённого хоста; имя и роль хоста не восстанавливаются по IP.</p></div>
       <span className="rounded-md border bg-background px-2 py-1 font-mono text-[10px] text-muted-foreground">READ ONLY · EVIDENCE FIRST</span>
     </header>
     <div className="flex flex-wrap items-center gap-2 border-b p-3">
@@ -139,7 +140,7 @@ export function HuntingEvidenceGraph({ graph, onEvidence }: HuntingEvidenceGraph
       <div className="min-w-0">
         <div className="flex flex-wrap gap-x-4 gap-y-2 border-b px-4 py-2 text-[10px] text-muted-foreground">{["process", "network", "persistence", "host"].map(kind => { const info = kindInfo(kind); return <span key={kind} className="inline-flex items-center gap-1.5"><info.Icon className={`h-3.5 w-3.5 ${info.color}`} aria-hidden="true" />{info.label}</span> })}<span>→ направление отношения, не поток атаки</span></div>
         <p id={helpId} className="px-4 py-2 text-[11px] text-muted-foreground">Tab — узел; Enter / пробел — инспектор; стрелки — соседний узел в списке; Esc — снять выбор. Область прокручивается по обеим осям.</p>
-        {!model.nodes.length ? <div className="flex min-h-80 flex-col items-center justify-center gap-3 p-8 text-center"><GitBranch className="h-9 w-9 text-muted-foreground" aria-hidden="true" /><h4 className="font-medium">{query.trim() ? "Совпадений нет" : "Доказательные связи недоступны"}</h4><p className="max-w-lg text-sm text-muted-foreground">{query.trim() ? "Попробуйте имя процесса, адрес или путь источника. Поиск не создаёт новых связей." : "Граф строится только по отношениям, найденным в импортированном снимке. Нужны строки процессов, сетевых соединений или автозапуска с доступными идентификаторами. Пустой граф не доказывает безопасность."}</p>{query && <button type="button" className={controlClass} onClick={() => setQuery("")}>Очистить поиск</button>}</div>
+        {!model.nodes.length ? <div className="flex min-h-80 flex-col items-center justify-center gap-3 p-8 text-center"><GitBranch className="h-9 w-9 text-muted-foreground" aria-hidden="true" /><h4 className="font-medium">{query.trim() ? "Совпадений нет" : "Сильных поведенческих связей не выявлено"}</h4><p className="max-w-lg text-sm text-muted-foreground">{query.trim() ? "Попробуйте имя процесса, адрес или путь источника. Поиск не создаёт новых связей." : "В основном графе скрыт обычный фон. Показаны только поведенческие сигналы и их доказательный контекст. Проверьте полноту сбора и исходные данные: пустой граф не доказывает безопасность."}</p>{query && <button type="button" className={controlClass} onClick={() => setQuery("")}>Очистить поиск</button>}</div>
           : <div ref={viewport} tabIndex={0} role="region" aria-label="Прокручиваемая схема связей" aria-describedby={helpId} className="h-[540px] max-w-full overflow-auto bg-muted/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary">
             <svg width={model.width * zoom} height={model.height * zoom} viewBox={`0 0 ${model.width} ${model.height}`} className="block max-w-none" role="group" aria-label="Направленный граф отношений">
               <defs><pattern id={`${uid}-grid`} width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="0.7" fill="currentColor" className="text-muted-foreground/20" /></pattern><marker id={`${uid}-arrow`} markerWidth="9" markerHeight="9" refX="8" refY="4" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,4 L0,8 Z" fill="currentColor" /></marker></defs>
@@ -191,8 +192,10 @@ export function HuntingEvidenceGraph({ graph, onEvidence }: HuntingEvidenceGraph
       </div>
       <aside className="min-w-0 border-t bg-muted/10 p-4 xl:border-l xl:border-t-0" aria-label="Инспектор выбранного узла" aria-live="polite">
         <div className="flex items-center justify-between"><h4 className="text-sm font-semibold">Инспектор узла</h4>{selected && <button type="button" className={controlClass} onClick={() => setSelectedId(null)} aria-label="Снять выбор узла"><X className="h-3.5 w-3.5" aria-hidden="true" /></button>}</div>
-        {!selected ? <div className="mt-5 space-y-3 text-xs leading-5 text-muted-foreground"><FileSearch className="h-7 w-7" aria-hidden="true" /><p>Выберите процесс, чтобы увидеть его родителей, дочерние процессы и сетевые endpoint, представленные в этом графе.</p><p>Стрелки повторяют source → target из анализа. Confidence — тип обоснования связи, а не вероятность атаки. Отсутствующая связь может означать неполноту снимка.</p></div> : <div className="mt-4 space-y-4">
+        {!selected ? <div className="mt-5 space-y-3 text-xs leading-5 text-muted-foreground"><FileSearch className="h-7 w-7" aria-hidden="true" /><p>Выберите узел: в инспекторе показаны причина включения, полная команда и исходные доказательства. Обычные процессы исключены; соседние объекты — контекст, не доказанная атака.</p><p>Стрелки повторяют source → target из анализа. Confidence — тип обоснования связи, а не вероятность атаки. Отсутствующая связь может означать неполноту снимка.</p></div> : <div className="mt-4 space-y-4">
           <div><span className={`text-[10px] font-medium uppercase ${kindInfo(selected.kind).color}`}>{kindInfo(selected.kind).label}</span><p className="mt-1 break-all text-sm font-semibold">{selected.label || selected.id}</p><p className="mt-2 break-all font-mono text-[11px] text-muted-foreground">{selected.id}</p></div>
+          {selected.reason && <div className="rounded-lg border p-3 text-xs leading-5"><p className="font-medium">{selected.role === "signal" ? "Поведенческий сигнал" : "Связанный контекст"}</p><p className="mt-1 break-words text-muted-foreground">{selected.reason}</p></div>}
+          {selected.command_line && <div><h5 className="text-xs font-medium">Командная строка</h5><pre className="mt-2 max-h-52 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-muted p-3 text-[11px]">{selected.command_line}</pre></div>}
           <div><h5 className="text-xs font-medium">Исходные строки · {refs.length}</h5><p className="mt-1 text-[11px] text-muted-foreground">Ссылка открывает строку источника, не подтверждает причинность.</p><div className="mt-2 max-h-52 space-y-1 overflow-y-auto">{refs.slice(0, MAX_REFS).map((ref, index) => <button type="button" key={`${ref.source}-${ref.row_number}-${index}`} onClick={() => onEvidence(ref)} disabled={!ref.source || !Number.isInteger(ref.row_number) || ref.row_number < 1} className="flex w-full items-center gap-2 rounded-lg border bg-background p-2 text-left text-xs hover:border-primary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40"><FileSearch className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" /><span className="min-w-0 flex-1"><span className="block break-all">{ref.source}</span><span className="text-muted-foreground">строка {ref.row_number}</span></span><ChevronRight className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /></button>)}</div>{!refs.length && <p className="mt-2 text-xs text-muted-foreground">Прямой ссылки на строку нет: объект может присутствовать только как контекст отношения.</p>}{refs.length > MAX_REFS && <p className="mt-2 text-xs text-muted-foreground">Показаны первые {MAX_REFS} ссылок из {refs.length}.</p>}</div>
           <div><h5 className="text-xs font-medium">Связи в текущем виде · {adjacent.length}</h5><div className="mt-2 max-h-64 space-y-2 overflow-y-auto">{adjacent.map((edge, index) => {
             const otherId = edge.source === selected.id ? edge.target : edge.source

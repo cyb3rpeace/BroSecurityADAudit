@@ -5,7 +5,7 @@ import re
 from datetime import datetime, timezone
 from urllib.parse import unquote
 
-VERSION = 'forensic-triage-4'
+VERSION = 'forensic-triage-5'
 MAX_FINDINGS = 200
 
 TRIAGE = {
@@ -38,6 +38,7 @@ class BaselineReview:
         self.iocs = {}
         self.timeline = []
         self.timeline_rows_seen = 0
+        self.host_rows = []
 
     @staticmethod
     def _number(row: dict, *keys, maximum=2**32 - 1):
@@ -243,7 +244,11 @@ class BaselineReview:
             self.unsupported.add(source)
             return
         self.counts[kind] += 1
-        if kind == 'Processes':
+        if kind == 'Host':
+            hostname = self._text(row, 'Hostname', 'Fqdn', 'Host') or 'collection scope'
+            self.host_rows.append((source, index, hostname))
+            self._node('host:scope', 'host', hostname, source, index)
+        elif kind == 'Processes':
             pid = self._number(row, 'Pid', 'PID', 'pid')
             if type(pid) is int and pid > 0:
                 parent = self._number(row, 'Ppid', 'PPid', 'ParentPid', 'ParentPID')
@@ -300,6 +305,10 @@ class BaselineReview:
             if isinstance(details, str) and re.search(r'(?i)(?:temp|downloads|appdata|users\\[^\\/]+\\desktop)', details):
                 self.add('persistence.startup_transient_path', 'Элемент автозапуска указывает на пользовательский или временный каталог',
                          'Путь автозапуска требует проверки владельца и подписи. Это эвристика, а не подтверждение вредоносности.', source, index)
+            commands = self._persistence_commands(kind, row)
+            if any(self._invocation_signal(self._executable(command) or '', command) for command in commands):
+                self.add('persistence.startup_suspicious_invocation', 'Подозрительная команда в автозапуске',
+                         'Обнаружены аргументы кодированного или удалённого выполнения. Конфигурация не доказывает факт запуска.', source, index, 'review')
         elif kind == 'Network':
             self.network.append((row, source, index))
             status = str(row.get('Status', '')).upper()
@@ -348,7 +357,8 @@ class BaselineReview:
         for item in self.finding_inventory:
             matches_by_row.setdefault((item['source'], item['row_number']), set()).add(item['rule_id'])
         behavioral_rules = {'process.encoded_powershell', 'process.suspicious_invocation',
-                            'persistence.service_suspicious_invocation', 'persistence.task_suspicious_invocation'}
+                            'persistence.service_suspicious_invocation', 'persistence.task_suspicious_invocation',
+                            'persistence.startup_suspicious_invocation'}
         behavioral_rows = {key for key, rules in matches_by_row.items() if rules & behavioral_rules}
         for row, source, index in self.network:
             pid = self._number(row, 'Pid', 'PID', 'pid')
@@ -475,6 +485,113 @@ class BaselineReview:
                         break
             return edge['source'] in self.graph_nodes and edge['target'] in self.graph_nodes
         self.graph_edges = [edge for edge in self.graph_edges if valid_edge(edge)]
+
+        context_graph = {'nodes': list(self.graph_nodes.values()), 'edges': list(self.graph_edges),
+                         'truncated': len(self.graph_nodes) >= 1000 or len(self.graph_edges) >= 2000}
+
+        # The analyst graph is a suspicious-behavior projection, not a process inventory.
+        # Keep only strong behavior and the minimum evidence context around it. Public IP,
+        # a routine process, or a normal service is never sufficient to enter this graph.
+        process_by_ref = {(source, index + 1): pid for pid, (source, index) in self.process_refs.items()
+                          if pid not in self.ambiguous_pids}
+        graph_rules = {'process.encoded_powershell', 'process.suspicious_invocation',
+                       'process.anomalous_parent_child', 'persistence.service_suspicious_invocation',
+                       'persistence.task_suspicious_invocation', 'persistence.startup_suspicious_invocation'}
+        row_rules = {}
+        for item in self.finding_inventory:
+            if item['rule_id'] in graph_rules:
+                row_rules.setdefault((item['source'], item['row_number']), set()).add(item['rule_id'])
+        suspicious_process_pids = {process_by_ref[key] for key in row_rules if key in process_by_ref}
+        suspicious_persistence = {key for key, rules in row_rules.items()
+                                  if any(rule.startswith('persistence.') for rule in rules)}
+        # Exact persistence-to-process path matches are retained only when the persistence
+        # row itself is suspicious or it launches a process already in the focus graph.
+        for kind, row, source, index in self.persistence:
+            paths = {executable(command) for command in self._persistence_commands(kind, row)} - {None}
+            row_key = (source, index + 1)
+            for pid, process in self.processes.items():
+                if pid in self.ambiguous_pids or process_path(process) not in paths:
+                    continue
+                if row_key in suspicious_persistence or pid in suspicious_process_pids:
+                    suspicious_persistence.add(row_key)
+                    suspicious_process_pids.add(pid)
+        # Preserve parent context for each suspicious process, bounded by the snapshot PID graph.
+        context_process_pids = set(suspicious_process_pids)
+        for pid in list(suspicious_process_pids):
+            current = pid
+            for _ in range(8):
+                parent = self._number(self.processes.get(current, {}), 'Ppid', 'PPid', 'ParentPid', 'ParentPID')
+                if parent not in process_pids or parent in self.ambiguous_pids: break
+                context_process_pids.add(parent); current = parent
+        # Build focus graph afresh AFTER signal selection: routine rows cannot consume
+        # the graph budget before a late suspicious process, host or endpoint arrives.
+        self.graph_nodes, self.graph_edges = {}, []
+        if suspicious_process_pids or suspicious_persistence:
+            for source, index, hostname in self.host_rows[:12]:
+                self._node('host:scope', 'host', hostname, source, index)
+        for pid in sorted(context_process_pids, key=lambda value: (value not in suspicious_process_pids, value)):
+            if pid not in process_pids:
+                continue
+            row = self.processes[pid]
+            source, index = self.process_refs[pid]
+            self._node(f'process:{pid}', 'process', str(row.get('Exe') or row.get('Name') or pid), source, index)
+        for pid in sorted(context_process_pids):
+            parent = self._number(self.processes.get(pid, {}), 'Ppid', 'PPid', 'ParentPid', 'ParentPID')
+            edge = {'source': f'process:{parent}', 'target': f'process:{pid}',
+                    'relation': 'parent_child', 'confidence': 'snapshot_pid'}
+            if parent in context_process_pids and valid_edge(edge):
+                self._edge(edge['source'], edge['target'], edge['relation'], edge['confidence'])
+        for kind, row, source, index in self.persistence:
+            if (source, index + 1) not in suspicious_persistence:
+                continue
+            node_id = f'{kind.lower()}:{source}:{index}'
+            self._node(node_id, 'persistence', str(row.get('Name') or row.get('TaskName') or kind), source, index)
+            paths = {executable(command) for command in self._persistence_commands(kind, row)} - {None}
+            for pid in sorted(suspicious_process_pids):
+                if process_path(self.processes.get(pid, {})) in paths and f'process:{pid}' in self.graph_nodes:
+                    self._edge(node_id, f'process:{pid}', 'executes', 'path_match')
+        for row, source, index in self.network:
+            pid = self._number(row, 'Pid', 'PID', 'pid')
+            if pid not in suspicious_process_pids or pid not in process_pids:
+                continue
+            if str(row.get('Status', '')).upper() not in ('ESTAB', 'ESTABLISHED'):
+                continue
+            remote = self._text(row, 'RemoteIP', 'RemoteAddr', 'RemoteAddress', 'RemoteEndpoint')
+            try:
+                address = ipaddress.ip_address(remote)
+                if address.is_unspecified or address.is_multicast:
+                    continue
+            except (ValueError, TypeError):
+                continue
+            port = self._number(row, 'RemotePort', 'RemotePortNumber', maximum=65535)
+            endpoint = f'[{address}]:{port}' if address.version == 6 and port is not None else f'{address}:{port}' if port is not None else str(address)
+            node_id = 'endpoint:' + endpoint
+            self._node(node_id, 'network', endpoint, source, index)
+            if node_id in self.graph_nodes and f'process:{pid}' in self.graph_nodes:
+                self._edge(f'process:{pid}', node_id, 'network_connection', 'snapshot_pid')
+        for node_id, node in self.graph_nodes.items():
+            rules = sorted({rule for ref in node.get('evidence_refs', [])
+                            for rule in row_rules.get((ref['source'], ref['row_number']), set())})
+            node['signal_rules'] = rules
+            node['role'] = 'signal' if rules else 'context'
+            node['reason'] = ('Поведенческий сигнал: ' + ', '.join(rules)) if rules else 'Контекст подозрительного действия; не самостоятельный индикатор атаки'
+            if node['kind'] == 'process':
+                pid = int(node_id.split(':')[1])
+                node['command_line'] = (self._text(self.processes.get(pid, {}), 'CommandLine', 'Cmdline', 'Command', 'Arguments') or '')[:4096]
+            elif node['kind'] == 'persistence':
+                ref = node['evidence_refs'][0]
+                for kind, row, source, index in self.persistence:
+                    if (source, index + 1) == (ref['source'], ref['row_number']):
+                        node['command_line'] = '\n'.join(self._persistence_commands(kind, row))[:4096]
+                        break
+            elif node['kind'] == 'network':
+                node['reason'] = 'Соединение процесса с поведенческим сигналом по PID снимка; C2 и одновременность не подтверждены'
+        # Scope containment is not a causal relationship. Link roots only to avoid
+        # obscuring the actual execution/network chain with a host-to-everything star.
+        targets = {edge['target'] for edge in self.graph_edges}
+        for node_id in sorted(self.graph_nodes):
+            if 'host:scope' in self.graph_nodes and node_id != 'host:scope' and node_id not in targets:
+                self._edge('host:scope', node_id, 'observed_on', 'collection_scope')
         unsupported = set(self.unsupported)
         for item in source_summaries:
             kind = self.source_kind(item['source'])
@@ -502,7 +619,11 @@ class BaselineReview:
                 'truncated': self.matches > MAX_FINDINGS, 'rows_reviewed': self.counts,
                 'source_coverage': [{'source': x['source'], 'rows': x.get('rows', 0), 'supported': self.source_kind(x['source']) is not None} for x in source_summaries],
                 'ambiguous_process_ids': len(self.ambiguous_pids),
-                'graph': {'nodes': list(self.graph_nodes.values()), 'edges': self.graph_edges, 'truncated': len(self.graph_nodes) >= 1000 or len(self.graph_edges) >= 2000},
+                'context_graph': context_graph,
+                'graph': {'nodes': list(self.graph_nodes.values()), 'edges': self.graph_edges,
+                          'scope': 'suspicious_behavior',
+                          'excluded_context': 'Routine process, public endpoint, and normal persistence rows are omitted; open full evidence for context.',
+                          'truncated': len(self.graph_nodes) >= 1000 or len(self.graph_edges) >= 2000},
                 'iocs': list(self.iocs.values())[:500],
                 'missing_sources': sorted({'Host', 'Processes', 'Network'} - expected),
                 'empty_sources': [k for k in sorted(expected & self.counts.keys()) if self.counts[k] == 0],

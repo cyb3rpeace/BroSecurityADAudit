@@ -1,5 +1,12 @@
+.git
+.env
+.env.*
 data
 reports
+certs
+backups
+.private-backups
 **/__pycache__
 **/*.pyc
-**/.env
+**/node_modules
+frontend/dist

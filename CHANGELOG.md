@@ -1,3 +1,12 @@
+## Deployment improvements — 2026-10-28
+
+- Added `install.sh` for one-command Linux x86-64 installation with Docker/Compose validation, random session secret, readiness waits and idempotent configuration.
+- Default Compose now starts API and Threat Hunting worker with persistent named volumes; removed production-specific container names, certificate paths and network names.
+- Added first-run TLS creation, random administrator credentials, secure file permissions and worker startup ordering.
+- Updated README with actual prerequisites, first login, updates, backup requirements, troubleshooting and Threat Hunting limitations.
+- Included the signal-first graph fix: routine process inventory no longer crowds out behavioral evidence; command, host, startup and private/public endpoint context is retained with evidence citations.
+- Clean installation and repeat installation verified in an isolated Compose project, without production data.
+
 ## 2.6.24 — 2026-10-28
 
 ### Threat Hunting

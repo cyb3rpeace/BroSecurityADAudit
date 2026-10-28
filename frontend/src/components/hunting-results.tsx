@@ -24,7 +24,7 @@ const errorMessage = (error: unknown, fallback: string) => error instanceof Erro
 // A path, a public IP, or a snapshot PID match is context, not a detection.
 const behavioralRules = new Set([
   "process.encoded_powershell", "process.suspicious_invocation",
-  "persistence.service_suspicious_invocation", "persistence.task_suspicious_invocation",
+  "persistence.service_suspicious_invocation", "persistence.task_suspicious_invocation", "persistence.startup_suspicious_invocation",
 ])
 function suspiciousFinding(finding: Finding, all: Finding[]): boolean {
   if (finding.review?.status === "benign") return false
