@@ -5,6 +5,8 @@
 - Hardened Linux fixed-path evidence collection and corrected SUID ownership metadata with installed-engine regression tests. Linked parent directories and wildcard drop-in paths are skipped; this is a snapshot check, not an atomic no-follow read against concurrent filesystem changes.
 - Added reviewed Windows account, WMI and Run/RunOnce wrapper query definitions with explicit output projections. These remain execution-unverified and gated: no claims of real Windows collection or event analysis coverage.
 - Windows event metadata stays gated pending real EVTX/Windows execution. No raw EventData, SAM hashes or unbounded built-in duplicate collection added.
+- Added narrow Linux cron/systemd literal invocation triage with exact source-row, configuration-line and evidence references. Benign interpreter use, `/tmp`, public IPs and SUID presence alone do not create strong findings. Linux persistence analysis remains partial and never executes, decodes or fetches configuration content.
+- Packaged Linux acceptance now verifies collection → encrypted archive → import → persistence → analysis → persisted evidence retrieval, including inert suspicious and benign cron/systemd fixtures. Result remains `not_determined` when collection completeness and execution history are unavailable.
 
 ## Deployment improvements — 2026-10-28
 

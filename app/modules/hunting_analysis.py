@@ -2,10 +2,11 @@
 import ipaddress
 import json
 import re
+import shlex
 from datetime import datetime, timezone
 from urllib.parse import unquote
 
-VERSION = 'forensic-triage-5'
+VERSION = 'forensic-triage-6-linux-persistence'
 MAX_FINDINGS = 200
 
 TRIAGE = {
@@ -22,7 +23,7 @@ class BaselineReview:
         # Compact metadata for every rule match; detailed evidence remains bounded.
         self.finding_inventory = []
         self.matches = 0
-        self.counts = {'Host': 0, 'Processes': 0, 'Network': 0, 'Services': 0, 'Tasks': 0, 'Startup': 0}
+        self.counts = {'Host': 0, 'Processes': 0, 'Network': 0, 'Services': 0, 'Tasks': 0, 'Startup': 0, 'LinuxServices': 0, 'LinuxCrontab': 0}
         self.sources = set()
         self.unsupported = set()
         self.processes = {}
@@ -39,6 +40,8 @@ class BaselineReview:
         self.timeline = []
         self.timeline_rows_seen = 0
         self.host_rows = []
+        self.linux_commands = {}
+        self.linux_gaps = set()
 
     @staticmethod
     def _number(row: dict, *keys, maximum=2**32 - 1):
@@ -85,6 +88,9 @@ class BaselineReview:
         if kind == 'Startup':
             command = cls._text(row, 'Details')
             return [command] if command else []
+        if kind in {'LinuxServices', 'LinuxCrontab'}:
+            # Do not path-correlate Linux shells or untrusted extra JSON fields.
+            return []
         commands = []
         def collect(action, depth=0):
             if depth > 4 or len(commands) >= 100:
@@ -138,6 +144,138 @@ class BaselineReview:
             return 'inline_script'
         return None
 
+    @staticmethod
+    def _linux_invocation(command, shell=True, depth=0):
+        """Recognize narrow invocation shapes; never evaluate, expand or decode input."""
+        if depth > 3 or len(command) > 65536:
+            return None
+        try:
+            lexer = shlex.shlex(command, posix=False, punctuation_chars='|;&()')
+            lexer.whitespace_split = True
+            lexer.commenters = '#'
+            tokens = list(lexer)
+            # Preserve quoted operators as data, but unwrap ordinary arguments.
+            tokens = [shlex.split(token)[0] if token[:1] in {'"', "'"} and token[1:-1] not in {'|', ';', '&&', '||'} else token for token in tokens]
+        except ValueError:
+            return None
+        if not tokens:
+            return None
+        basename = lambda value: value.rsplit('/', 1)[-1]
+        shells = {'sh', 'bash', 'dash', 'zsh', 'ksh'}
+        # Explicit shell command strings are parsed as shell syntax. systemd itself
+        # does NOT interpret pipes, substitutions or shell metacharacters.
+        exe = basename(tokens[0])
+        if exe in shells and len(tokens) == 3 and tokens[1] in {'-c', '-lc'}:
+            return BaselineReview._linux_invocation(tokens[2], True, depth + 1)
+        if exe in {'python', 'python3', 'python2'} and len(tokens) == 3 and tokens[1] == '-c':
+            if re.search(r'\bexec\s*\(\s*(?:base64\.)?b64decode\s*\(\s*["\'][A-Za-z0-9+/]{20,}={0,2}["\']', tokens[2]):
+                return 'encoded_interpreter_execution'
+        if exe == 'perl' and len(tokens) == 3 and tokens[1] == '-e':
+            if re.search(r'\beval\s*\(?\s*decode_base64\s*\(\s*["\'][A-Za-z0-9+/]{20,}={0,2}["\']', tokens[2]):
+                return 'encoded_interpreter_execution'
+        if not shell:
+            return None
+        # Only direct pipeline stages are accepted. No substring searching of echo,
+        # descriptions, arbitrary quoted strings, variables or command substitutions.
+        for i, token in enumerate(tokens):
+            if token != '|' or i == 0 or i + 1 >= len(tokens):
+                continue
+            left_start = max([j + 1 for j in range(i) if tokens[j] in {'|', ';', '&&', '||'}] or [0])
+            left = tokens[left_start:i]
+            right_end = next((j for j in range(i + 1, len(tokens)) if tokens[j] in {'|', ';', '&&', '||'}), len(tokens))
+            right = tokens[i + 1:right_end]
+            if not left or not right or basename(right[0]) not in shells:
+                continue
+            # A shell script filename after sh is not stdin execution.
+            if any(arg not in {'-s', '--', '-e', '-u', '-x', '-eu'} for arg in right[1:]):
+                continue
+            tool = basename(left[0])
+            urls = [arg for arg in left[1:] if re.fullmatch(r'https?://[^\s]+', arg)]
+            if tool == 'curl' and urls and not any(arg in {'-o', '--output', '-O', '--remote-name'} or arg.startswith(('--output=', '-o')) for arg in left[1:]):
+                return 'download_to_shell'
+            if tool == 'wget' and urls and ('-O-' in left or any(left[j:j+2] == ['-O', '-'] for j in range(len(left)-1))):
+                return 'download_to_shell'
+            if tool == 'base64' and any(arg in {'-d', '--decode'} for arg in left[1:]):
+                return 'decoded_payload_to_shell'
+        return None
+
+    def _linux_persistence(self, kind, row, source, index):
+        content, path = row.get('Content'), self._text(row, 'OSPath') or ''
+        if not isinstance(content, str):
+            self.linux_gaps.add('Linux config Content missing or not text')
+            return
+        truncated = row.get('ContentTruncated') is True or len(content) > 65536
+        content = content[:65536]
+        lines = content.splitlines()
+        if truncated:
+            self.linux_gaps.add('Truncated Linux content: final partial line omitted; unseen content not assessed')
+            lines = lines[:-1]
+        section = ''
+        commands = []
+        for number, raw in enumerate(lines, 1):
+            line = raw.strip()
+            if not line or line.startswith(('#', ';')):
+                continue
+            if line.endswith('\\'):
+                self.linux_gaps.add('Linux multiline continuations unsupported')
+                # Fail closed for this file rather than treating continuation lines
+                # as independent directives or cron commands.
+                break
+            if kind == 'LinuxServices':
+                if line.startswith('[') and line.endswith(']'):
+                    section = line[1:-1]
+                    continue
+                if '=' not in line:
+                    continue
+                key, value = line.split('=', 1)
+                key, value = key.strip(), value.strip()
+                if section != 'Service' or key not in {'ExecStart', 'ExecStartPre', 'ExecStartPost', 'ExecReload', 'ExecStop', 'ExecStopPost', 'ExecCondition'}:
+                    self.linux_gaps.add('Only literal systemd Service Exec directives are analyzed; other directives unsupported')
+                    continue
+                if not value:
+                    commands = [item for item in commands if item[3] != key]
+                    continue
+                if value[0] in '-+!:@' or '%' in value or '$' in value:
+                    self.linux_gaps.add('Systemd prefixes, specifiers and variable expansion unsupported')
+                    continue
+                commands.append((number, raw, value, key))
+            else:
+                system = path == '/etc/crontab' or path.startswith('/etc/cron.d/')
+                user = path.startswith('/var/spool/cron/')
+                if not (system or user):
+                    self.linux_gaps.add('Periodic cron scripts are collected as data, not analyzed as shell programs')
+                    break
+                if re.match(r'^[A-Za-z_][A-Za-z0-9_]*\s*=', line):
+                    continue
+                parts = line.split(None, (6 if system else 5))
+                if line.startswith('@'):
+                    parts = line.split(None, (2 if system else 1))
+                    valid = parts[0] in {'@reboot', '@yearly', '@annually', '@monthly', '@weekly', '@daily', '@midnight', '@hourly'}
+                    needed = 3 if system else 2
+                else:
+                    valid = len(parts) >= 5 and all(re.fullmatch(r'[0-9*/,:A-Za-z-]+', part) for part in parts[:5])
+                    needed = 7 if system else 6
+                if valid and len(parts) == needed:
+                    command = re.split(r'(?<!\\)%', parts[-1], maxsplit=1)[0]
+                    commands.append((number, raw, command, 'cron'))
+        self.linux_commands[(source, index)] = [item[2] for item in commands]
+        self.persistence.append((kind, row, source, index))
+        for number, raw, command, directive in commands:
+            signal = self._linux_invocation(command, kind == 'LinuxCrontab')
+            if not signal:
+                continue
+            rule = 'persistence.linux_' + ('systemd' if kind == 'LinuxServices' else 'cron') + '_suspicious_invocation'
+            self.add(rule, 'Linux persistence invocation requires review',
+                     f'Literal configuration matches {signal}; configuration is not proof of execution or compromise.', source, index,
+                     checks=['Review the full original configuration row and owning package/user',
+                             'Validate payload offline without executing it',
+                             'Corroborate with execution history and approved administration'])
+            if self.findings and (self.findings[-1]['source'], self.findings[-1]['row_offset'], self.findings[-1]['rule_id']) == (source, index, rule):
+                self.findings[-1]['config_evidence'] = {'field': 'Content', 'line_number': number,
+                    'line': raw[:4096], 'line_excerpt_truncated': len(raw) > 4096,
+                    'command': command[:4096], 'signal': signal, 'directive': directive,
+                    'content_truncated': truncated}
+
     @classmethod
     def _evidence_value(cls, value, depth=0):
         if isinstance(value, str):
@@ -167,7 +305,7 @@ class BaselineReview:
     @staticmethod
     def source_kind(source):
         decoded = unquote(source)
-        match = re.fullmatch(r'results/BroSec\.Offline\.Baseline/(Host|Processes|Network|Services|Tasks|Startup)\.json', decoded)
+        match = re.fullmatch(r'results/BroSec\.Offline\.Baseline/(Host|Processes|Network|Services|Tasks|Startup|LinuxServices|LinuxCrontab)\.json', decoded)
         if match:
             return match[1]
         builtin_paths = {
@@ -232,7 +370,7 @@ class BaselineReview:
         self.sources.add(source)
         self._collect_iocs(source, index, row)
         if len(self.evidence_rows) < 5000:
-            self.evidence_rows[(source, index)] = {k: self._evidence_value(row[k]) for k in ('Pid', 'PID', 'pid', 'Ppid', 'PPid', 'ParentPid', 'ParentPID', 'Exe', 'Username', 'Status', 'RemoteIP', 'RemoteAddr', 'RemoteAddress', 'RemoteEndpoint', 'RemotePort', 'RemotePortNumber', 'LocalIP', 'LocalPort', 'Name', 'TaskName', 'PathName', 'AbsoluteExePath', 'ServiceDll', 'Command', 'CommandLine', 'Cmdline', 'Arguments', 'Actions', 'Details') if k in row}
+            self.evidence_rows[(source, index)] = {k: self._evidence_value(row[k]) for k in ('Pid', 'PID', 'pid', 'Ppid', 'PPid', 'ParentPid', 'ParentPID', 'Exe', 'Username', 'Status', 'RemoteIP', 'RemoteAddr', 'RemoteAddress', 'RemoteEndpoint', 'RemotePort', 'RemotePortNumber', 'LocalIP', 'LocalPort', 'Name', 'TaskName', 'PathName', 'AbsoluteExePath', 'ServiceDll', 'Command', 'CommandLine', 'Cmdline', 'Arguments', 'Actions', 'Details', 'OSPath', 'Content', 'ContentTruncated', 'Size', 'Mode', 'OwnerID', 'GroupID') if k in row}
         timestamp = self._timestamp(row)
         if timestamp:
             self.timeline_rows_seen += 1
@@ -299,6 +437,8 @@ class BaselineReview:
             if any(self._invocation_signal(self._executable(command) or '', command) for command in commands):
                 self.add(f'persistence.{prefix}_suspicious_invocation', 'Подозрительные аргументы в конфигурации автозапуска',
                          'Конфигурация содержит закодированную PowerShell-команду либо аргументы удалённого/inline выполнения скрипта. Проверьте payload, владельца и назначение. Конфигурация не доказывает факт запуска или компрометацию.', source, index)
+        elif kind in {'LinuxServices', 'LinuxCrontab'}:
+            self._linux_persistence(kind, row, source, index)
         elif kind == 'Startup':
             self.persistence.append((kind, row, source, index))
             details = row.get('Details')
@@ -358,7 +498,8 @@ class BaselineReview:
             matches_by_row.setdefault((item['source'], item['row_number']), set()).add(item['rule_id'])
         behavioral_rules = {'process.encoded_powershell', 'process.suspicious_invocation',
                             'persistence.service_suspicious_invocation', 'persistence.task_suspicious_invocation',
-                            'persistence.startup_suspicious_invocation'}
+                            'persistence.startup_suspicious_invocation',
+                            'persistence.linux_systemd_suspicious_invocation', 'persistence.linux_cron_suspicious_invocation'}
         behavioral_rows = {key for key, rules in matches_by_row.items() if rules & behavioral_rules}
         for row, source, index in self.network:
             pid = self._number(row, 'Pid', 'PID', 'pid')
@@ -496,7 +637,8 @@ class BaselineReview:
                           if pid not in self.ambiguous_pids}
         graph_rules = {'process.encoded_powershell', 'process.suspicious_invocation',
                        'process.anomalous_parent_child', 'persistence.service_suspicious_invocation',
-                       'persistence.task_suspicious_invocation', 'persistence.startup_suspicious_invocation'}
+                       'persistence.task_suspicious_invocation', 'persistence.startup_suspicious_invocation',
+                            'persistence.linux_systemd_suspicious_invocation', 'persistence.linux_cron_suspicious_invocation'}
         row_rules = {}
         for item in self.finding_inventory:
             if item['rule_id'] in graph_rules:
@@ -582,7 +724,7 @@ class BaselineReview:
                 ref = node['evidence_refs'][0]
                 for kind, row, source, index in self.persistence:
                     if (source, index + 1) == (ref['source'], ref['row_number']):
-                        node['command_line'] = '\n'.join(self._persistence_commands(kind, row))[:4096]
+                        node['command_line'] = '\n'.join(self.linux_commands.get((source, index), self._persistence_commands(kind, row)))[:4096]
                         break
             elif node['kind'] == 'network':
                 node['reason'] = 'Соединение процесса с поведенческим сигналом по PID снимка; C2 и одновременность не подтверждены'
@@ -628,8 +770,14 @@ class BaselineReview:
                 'missing_sources': sorted({'Host', 'Processes', 'Network'} - expected),
                 'empty_sources': [k for k in sorted(expected & self.counts.keys()) if self.counts[k] == 0],
                 'unsupported_sources': sorted(unsupported),
-                'limitations': ['Отсутствие срабатываний не подтверждает отсутствие угроз',
-                                'Проверяются источники Host, Processes, Network, Services, Tasks и Startup из точечного сбора; отсутствие persistence-источника не трактуется как отсутствие угроз',
+                'limitations': sorted(self.linux_gaps) + [
+                                'Linux analysis is literal snapshot config triage, not execution history, enablement or maliciousness attribution',
+                                'LinuxSUID remains unsupported for threat analysis: mode/owner presence alone is not a strong signal',
+                                'Linux shell analysis is a narrow invocation subset; compound scripts, substitutions, aliases, includes and environment resolution are unsupported',
+                                'Systemd effective configuration, drop-ins, timers, generators, dependencies and overridden vendor units are not resolved',
+                                'LinuxServices and LinuxCrontab support is partial: literal commands only; unsupported syntax is not a clean bill of health',
+                                'Отсутствие срабатываний не подтверждает отсутствие угроз',
+                                'Проверяются источники Host, Processes, Network, Services, Tasks, Startup и ограниченное подмножество LinuxServices/LinuxCrontab из точечного сбора; отсутствие persistence-источника не трактуется как отсутствие угроз',
                                 'Нет проверки подписей, хешей по репутации, ACL, истории событий и полноты сбора',
                                 'Классификация «наблюдение» не является уязвимостью или подтверждённой атакой',
                                 'Источник и строки получены из загруженного архива, авторство не подтверждено']}
