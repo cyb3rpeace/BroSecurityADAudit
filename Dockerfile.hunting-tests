@@ -1,0 +1,5 @@
+ARG APP_IMAGE=ad-identity-guard:2.0
+FROM ${APP_IMAGE}
+USER root
+COPY requirements-test.txt /tmp/requirements-test.txt
+RUN pip install --no-cache-dir -r /tmp/requirements-test.txt

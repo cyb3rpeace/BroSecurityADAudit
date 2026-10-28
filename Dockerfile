@@ -8,7 +8,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         openssh-client \
-        openssl \
         fonts-dejavu-core \
         tzdata \
         ca-certificates \
@@ -19,9 +18,10 @@ WORKDIR /opt/ad-audit
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+COPY tools ./tools
+RUN chmod -R a+rX /opt/ad-audit/tools
 COPY app ./app
-COPY docker/entrypoint.sh /opt/ad-audit/entrypoint.sh
-RUN chmod +x /opt/ad-audit/entrypoint.sh
+RUN chmod -R a+rX /opt/ad-audit/app
 
 RUN mkdir -p /opt/ad-audit/data /opt/ad-audit/reports \
     && printf '%s\n' \
@@ -41,4 +41,4 @@ ENV OPENSSL_CONF=/opt/ad-audit/openssl-legacy.cnf
 
 EXPOSE 8000
 
-CMD ["/opt/ad-audit/entrypoint.sh"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]

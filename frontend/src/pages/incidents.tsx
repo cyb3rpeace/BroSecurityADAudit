@@ -8,6 +8,7 @@ import { Kpi, PageHead, Severity, StatusButton } from "@/components/bits"
 import { Pager } from "@/components/pager"
 import { Bars, Donut, LegendButtons } from "@/components/charts"
 import { countBy, incidentsOf, matchesQuery, palette, rowStatus, sourceName } from "@/lib/findings"
+import { ExportButtons } from "@/components/export-buttons"
 import { useApp } from "@/app-state"
 
 export function Incidents() {
@@ -66,6 +67,7 @@ export function Incidents() {
             {cats.map((cat) => <SelectItem key={cat} value={cat}>{cat}</SelectItem>)}
           </SelectContent>
         </Select>
+        <ExportButtons ids={shown.map((row) => row.id)} />
         <Select value={filters.tactic || "all"} onValueChange={(value) => patchFilters({ tactic: value === "all" ? "" : value })}>
           <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
           <SelectContent>

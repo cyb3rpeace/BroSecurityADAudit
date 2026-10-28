@@ -1,6 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { PageHead, Severity } from "@/components/bits"
 import { isPath, matchesQuery } from "@/lib/findings"
+import { ExportButtons } from "@/components/export-buttons"
 import { useApp } from "@/app-state"
 
 const NOTES: Record<string, { ru: string; en: string }> = {
@@ -28,6 +29,7 @@ export function Paths() {
   return (
     <div>
       <PageHead title={t("path.title")} sub={t("path.sub")} />
+      <div className="mb-4"><ExportButtons ids={rows.map((row) => row.id)} /></div>
       <div className="grid gap-3">
         {rows.length ? rows.map((row) => (
           <Card key={row.id} className="cursor-pointer" onClick={() => void openFinding(row)}>

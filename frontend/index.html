@@ -8,7 +8,7 @@
     <script>
       (function () {
         var saved = localStorage.getItem("brosec-theme");
-        var theme = saved === "light" || saved === "cyber" ? saved : "dark";
+        var theme = saved === "light" ? "light" : "dark";
         document.documentElement.dataset.theme = theme;
         if (theme !== "light") document.documentElement.classList.add("dark");
       })();

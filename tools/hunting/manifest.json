@@ -1,0 +1,13 @@
+{
+  "engine": {
+    "sha256": "93171158fa081c07e3dd6b2cfc194f1a1db3eb30861639ad16eae6092afa42f7"
+  },
+  "targets": {
+    "linux": {
+      "sha256": "93171158fa081c07e3dd6b2cfc194f1a1db3eb30861639ad16eae6092afa42f7"
+    },
+    "windows": {
+      "sha256": "3d20a5a2d272e3eb2bccae4a80ebe469fc1a6f63eb4a8f8a586dbae356437d32"
+    }
+  }
+}

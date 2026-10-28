@@ -3,15 +3,31 @@ name: ad-audit
 services:
   ad-security-core:
     build: .
-    image: ad-identity-guard:2.2
+    image: ad-identity-guard:2.0
     container_name: ad-security-core
     env_file: .env
+    user: "1000:1000"
+    command:
+      - uvicorn
+      - app.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --proxy-headers
+      - --ssl-certfile
+      - /opt/ad-audit/certs/hidedoc.crt
+      - --ssl-keyfile
+      - /opt/ad-audit/certs/hidedoc.key
     ports:
       - "9443:8000"
     volumes:
       - ./data:/opt/ad-audit/data
       - ./reports:/opt/ad-audit/reports
-      - ./certs:/opt/ad-audit/certs
+      - ./certs/hidedoc.crt:/opt/ad-audit/certs/hidedoc.crt:ro
+      - ./certs/hidedoc.key:/opt/ad-audit/certs/hidedoc.key:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - audit-net
     restart: unless-stopped
@@ -21,12 +37,13 @@ services:
           "CMD",
           "python",
           "-c",
-          "import ssl,urllib.request; ctx=ssl._create_unverified_context(); urllib.request.urlopen('https://127.0.0.1:8000/health', context=ctx, timeout=5)",
+          "import ssl,urllib.request; ctx=ssl._create_unverified_context(); urllib.request.urlopen('https://127.0.0.1:8000/health/ready', context=ctx, timeout=5)",
         ]
       interval: 30s
       timeout: 8s
       retries: 5
       start_period: 25s
+
 
 networks:
   audit-net:

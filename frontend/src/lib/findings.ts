@@ -28,6 +28,19 @@ export const ACCOUNT_IDS = new Set([
   "large_group",
   "deep_group_nesting",
   "circular_group_nesting",
+  "primary_group",
+  "default_container",
+  "schema_admins",
+  "operator_group",
+  "dns_admins",
+  "admin_count",
+  "admin_delegatable",
+  "admin_password_never",
+  "azure_sso",
+  "unix_password",
+  "duplicate_upn",
+  "smartcard_password",
+  "dmsa_link",
 ])
 export const DEVICE_IDS = new Set([
   "obsolete_os",
@@ -55,6 +68,14 @@ export const DEVICE_IDS = new Set([
   "smb_encryption_off",
   "smb_client_signing_off",
   "audit_ds_changes_off",
+  "rodc_present",
+  "rodc_reveal",
+  "rodc_never",
+  "dc_owner",
+  "dc_uptime",
+  "ms14_068",
+  "kerberos_armoring",
+  "anonymous_sam",
 ])
 export const PATH_IDS = new Set([
   "kerberoasting",
@@ -66,6 +87,22 @@ export const PATH_IDS = new Set([
   "shadow_credential",
   "machine_quota",
   "dangerous_acl",
+  "dangerous_ou_right",
+  "adcs_weak_key",
+  "adcs_http",
+  "adcs_no_sid_ext",
+  "adcs_schema_v1",
+  "adcs_any_purpose",
+  "adcs_enroll_agent",
+  "adcs_oid_group",
+  "adcs_explicit_map",
+  "adcs_template_acl",
+  "adcs_ca_acl",
+  "adcs_san_attrib",
+  "adcs_rpc_encrypt",
+  "adcs_ext_disabled",
+  "adcs_weak_mapping",
+  "dmsa_link",
 ])
 
 const SOURCE_NAMES: Record<string, string> = {
@@ -89,6 +126,26 @@ export function rank(row: Finding) {
 
 export function incidentsOf(rows: Finding[]) {
   return rows.filter((row) => row.severity !== "info")
+}
+
+export const ACCOUNT_KINDS: { id: string; ru: string; en: string; ids: string[] }[] = [
+  { id: "user", ru: "Пользователь", en: "User", ids: ["ordinary_privileged", "stale_password", "inactive_stale", "guest_enabled", "priv_password_never_expires", "not_in_protected_users", "honeytoken", "password_not_required", "password_in_description", "des_enabled", "rc4_only", "sid_history", "pre_windows_2000", "foreign_privileged", "exchange_permissions", "primary_group", "admin_delegatable", "admin_password_never", "azure_sso", "unix_password", "duplicate_upn", "smartcard_password"] },
+  { id: "service", ru: "Служба", en: "Service", ids: ["kerberoasting", "asrep_preauth", "gpp_password", "dmsa_link"] },
+  { id: "group", ru: "Группа", en: "Group", ids: ["empty_security_group", "large_group", "deep_group_nesting", "circular_group_nesting", "schema_admins", "operator_group", "dns_admins", "admin_count"] },
+  { id: "policy", ru: "Политика", en: "Policy", ids: ["password_length", "password_history", "no_lockout", "reversible_encryption", "weak_pso", "default_container"] },
+]
+
+export const DEVICE_KINDS: { id: string; ru: string; en: string; ids: string[] }[] = [
+  { id: "computer", ru: "Компьютер", en: "Computer", ids: ["obsolete_os", "stale_computer", "machine_password_old", "laps_gap", "empty_ou"] },
+  { id: "controller", ru: "Контроллер", en: "Controller", ids: ["print_spooler_on_dc", "time_skew", "time_ok", "single_dc", "fsmo_single_host", "ntfrs_sysvol", "audit_ds_changes_off", "webclient_running", "rodc_present", "rodc_reveal", "rodc_never", "dc_owner", "dc_uptime", "ms14_068", "kerberos_armoring", "anonymous_sam"] },
+  { id: "software", ru: "Программа", en: "Software", ids: ["anydesk_detected", "teamviewer_detected", "rustdesk_detected", "vnc_detected", "vpn_unauthorized", "remote_access_detected", "rat_detected"] },
+  { id: "network", ru: "Сеть", en: "Network", ids: ["active_smbv1", "smb_encryption_off", "smb_client_signing_off", "dns_wildcard", "orphan_subnet"] },
+]
+
+export function objectKind(row: Finding, kinds: { id: string; ids: string[] }[]) {
+  if ((row.tags || "").includes("shadow_it")) return "software"
+  const found = kinds.find((item) => item.ids.includes(row.vuln_id))
+  return found?.id || "other"
 }
 
 export function isAccount(row: Finding) {
@@ -141,13 +198,6 @@ export function palette(theme: Theme) {
       line: "#14b8a6",
       donut: ["#ef4444", "#f59e0b", "#3b82f6", "#10b981"],
       bar: ["#14b8a6", "#38bdf8", "#6366f1", "#f59e0b", "#ef4444"],
-    }
-  }
-  if (theme === "cyber") {
-    return {
-      line: "#e14bff",
-      donut: ["#ff3b5c", "#ff9f1a", "#b44cff", "#2ee59d"],
-      bar: ["#ff9f1a", "#3ecbff", "#e14bff", "#2ee59d", "#ff3b5c"],
     }
   }
   return {

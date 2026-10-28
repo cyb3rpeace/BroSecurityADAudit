@@ -57,6 +57,40 @@ $wpadOff = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\In
 if (-not ($wpadOff -and [int]$wpadOff -eq 1)) { Emit 'wpad_enabled' 'medium' 'Автопоиск прокси WPAD не отключен' 'DisableWpad не равен 1.' }
 $web = Get-Service -Name WebClient -ErrorAction SilentlyContinue
 if ($web -and $web.Status -eq 'Running') { Emit 'webclient_running' 'medium' 'На контроллере запущена служба WebClient' 'Служба открывает контроллеру доступ к WebDAV. На контроллере её обычно не держат.' }
+$fast = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\Kdc' -Name KdcEnableFast -ErrorAction SilentlyContinue).KdcEnableFast
+if ($null -eq $fast -or [int]$fast -lt 1) { Emit 'kerberos_armoring' 'low' 'Броня Kerberos не включена' 'Параметр KdcEnableFast не задан. Билеты консоль не запрашивает.' }
+$sam = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name RestrictAnonymousSAM -ErrorAction SilentlyContinue).RestrictAnonymousSAM
+if ($null -ne $sam -and [int]$sam -eq 0) { Emit 'anonymous_sam' 'medium' 'Анонимное чтение локальных имён разрешено' 'RestrictAnonymousSAM равен 0. Список имён по этому каналу консоль не запрашивает.' }
+try {
+  $os = Get-CimInstance Win32_OperatingSystem -ErrorAction Stop
+  $days = [math]::Floor(((Get-Date) - $os.LastBootUpTime).TotalDays)
+  if ($days -gt 120) { Emit 'dc_uptime' 'low' 'Контроллер давно не перезагружался' ('С последней загрузки прошло ' + $days + ' дн. Журнал событий не копируется.') }
+} catch {}
+try {
+  $ver = [Environment]::OSVersion.Version
+  if ($ver.Major -lt 10) {
+    $hf = Get-HotFix -Id KB3011780 -ErrorAction SilentlyContinue
+    if (-not $hf) { Emit 'ms14_068' 'high' 'На старой версии Windows нет обновления Kerberos' 'В списке установленных обновлений нет KB3011780. Пакет не запускается, читается только факт установки.' }
+  }
+} catch {}
+$strong = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\Kdc' -Name StrongCertificateBindingEnforcement -ErrorAction SilentlyContinue).StrongCertificateBindingEnforcement
+if ($null -eq $strong -or [int]$strong -lt 2) { Emit 'adcs_weak_mapping' 'medium' 'Сопоставление сертификата с учётной записью не жёсткое' 'StrongCertificateBindingEnforcement ниже 2. Сертификаты не читаются.' }
+$caRoot = 'HKLM:\SYSTEM\CurrentControlSet\Services\CertSvc\Configuration'
+if (Test-Path -LiteralPath $caRoot) {
+  $active = (Get-ItemProperty $caRoot -Name Active -ErrorAction SilentlyContinue).Active
+  foreach ($caName in @($active)) {
+    if (-not $caName) { continue }
+    $caBase = Join-Path $caRoot $caName
+    $policy = Join-Path $caBase 'PolicyModules\CertificateAuthority_MicrosoftDefault.Policy'
+    $edit = (Get-ItemProperty $policy -Name EditFlags -ErrorAction SilentlyContinue).EditFlags
+    if ($edit -and ([int]$edit -band 0x40000)) { Emit 'adcs_san_attrib' 'high' 'Центр сертификации принимает имя в атрибутах запроса' 'Включён признак имени субъекта в атрибутах запроса. Сам запрос не отправляется.' }
+    $iface = (Get-ItemProperty $caBase -Name InterfaceFlags -ErrorAction SilentlyContinue).InterfaceFlags
+    if ($null -ne $iface -and -not ([int]$iface -band 0x800)) { Emit 'adcs_rpc_encrypt' 'medium' 'Запрос сертификата по RPC не требует шифрования' 'На центре не включено требование шифрования запроса. Запрос не отправляется.' }
+    $disabled = (Get-ItemProperty $policy -Name DisableExtensionList -ErrorAction SilentlyContinue).DisableExtensionList
+    $joined = (@($disabled) -join ' ')
+    if ($joined -match '1\.3\.6\.1\.4\.1\.311\.25\.2') { Emit 'adcs_ext_disabled' 'high' 'Центр сертификации отключил расширение безопасности' 'Расширение привязки сертификата к каталогу отключено в политике центра. Список целиком не копируется.' }
+  }
+}
 Write-Output 'PROTO_DONE'
 """
 

@@ -35,6 +35,37 @@ def _filetime(value: Any) -> datetime | None:
     return datetime(1601, 1, 1) + timedelta(microseconds=number / 10)
 
 
+def _values(entry: Any, name: str) -> list[Any]:
+    try:
+        attr = entry[name]
+    except Exception:
+        return []
+    if attr is None:
+        return []
+    value = attr.value
+    if isinstance(value, list):
+        return value
+    return [value] if value else []
+
+
+def _gplinks(raw: str) -> list[dict[str, Any]]:
+    rows = []
+    for match in re.finditer(r"\[LDAP://([^;\]]+);(\d+)\]", raw or "", re.I):
+        guid = re.search(r"\{[0-9A-Fa-f-]+\}", match.group(1))
+        try:
+            flag = int(match.group(2))
+        except ValueError:
+            flag = 0
+        rows.append({
+            "guid": guid.group(0) if guid else "",
+            "enabled": flag not in (1, 3),
+            "enforced": flag in (2, 3),
+        })
+        if len(rows) >= 8:
+            break
+    return rows
+
+
 def _first(entry: Any, name: str) -> Any:
     attr = entry[name]
     if attr is None:
@@ -214,6 +245,8 @@ _DELEGATION = 0x80000
 _DES = 0x200000
 _NO_PREAUTH = 0x400000
 _PROTOCOL_TRANSITION = 0x1000000
+_DONT_EXPIRE = 0x10000
+_NOT_DELEGATED = 0x100000
 _LEVELS = {0: "2000", 2: "2003", 3: "2008", 4: "2008 R2", 5: "2012", 6: "2012 R2", 7: "2016", 10: "2025"}
 
 
@@ -715,7 +748,115 @@ def scan_surface_ldap(conn: Connection, base: str) -> list[dict[str, Any]]:
             "vuln_id": "fsmo_single_host",
         }, 1)
     _structure_ldap(conn, base, findings, counts)
+    _coverage_ldap(conn, base, findings, counts)
+    _depth_ldap(conn, base, findings, counts)
     return findings
+
+
+def _coverage_ldap(conn: Connection, base: str, findings: list[dict[str, Any]], counts: dict[str, int]) -> None:
+    """Проверки из каталога правил оценки, которых не было в гигиене. Только чтение LDAP."""
+    hidden = _safe_search(
+        conn,
+        base,
+        f"(&(objectCategory=person)(objectClass=user)(!(primaryGroupID=513))(!(userAccountControl:1.2.840.113556.1.4.803:={_DISABLE})))",
+        ["sAMAccountName", "primaryGroupID"],
+        12,
+    )
+    for entry in hidden:
+        sam = str(_first(entry, "sAMAccountName") or "")
+        if sam.lower() in {"guest", "krbtgt"}:
+            continue
+        _keep(findings, counts, {
+            "hostname": sam,
+            "category": "Учетные записи",
+            "title": "Основная группа не Domain Users",
+            "severity": "medium",
+            "detail": f"primaryGroupID={_first(entry, 'primaryGroupID') or '?'}. Членство в основной группе не видно в списке member. Верните Domain Users, если скрывать группу не зачем.",
+            "tags": "baseline,surface,module:baseline_hygiene",
+            "vuln_id": "primary_group",
+        })
+    known = _safe_search(conn, base, "(objectClass=domainDNS)", ["wellKnownObjects"], 1)
+    if known:
+        raw = _values(known[0], "wellKnownObjects")
+        stuck = []
+        for item in raw:
+            text = str(item)
+            if "AA312825768811D1ADED00C04FD8D5CD" in text.upper() and text.upper().endswith("CN=COMPUTERS," + base.upper()):
+                stuck.append("компьютеры")
+            if "A9D1CA15768811D1ADED00C04FD8D5CD" in text.upper() and text.upper().endswith("CN=USERS," + base.upper()):
+                stuck.append("пользователи")
+        if stuck:
+            _keep(findings, counts, {
+                "hostname": base,
+                "category": "Подразделения",
+                "title": "Новые объекты всё ещё попадают в контейнер по умолчанию",
+                "severity": "low",
+                "detail": "Не перенаправлены: " + ", ".join(stuck) + ". Перенос делают redircmp и redirusr. Сами объекты контейнера не удаляются.",
+                "tags": "baseline,surface,module:baseline_hygiene",
+                "vuln_id": "default_container",
+            })
+    for group_name, vuln_id, title, severity in (
+        ("Schema Admins", "schema_admins", "В группе Schema Admins есть участники", "high"),
+        ("Account Operators", "operator_group", "Группа Account Operators не пуста", "high"),
+        ("Server Operators", "operator_group", "Группа Server Operators не пуста", "high"),
+        ("Print Operators", "operator_group", "Группа Print Operators не пуста", "medium"),
+        ("DnsAdmins", "dns_admins", "В группе DnsAdmins есть участники", "medium"),
+    ):
+        groups = _safe_search(conn, base, f"(&(objectClass=group)(cn={group_name}))", ["member"], 1)
+        if not groups:
+            continue
+        members = [part for part in _values(groups[0], "member") if part]
+        if not members:
+            continue
+        names = ", ".join(_cn(str(part)) for part in members[:5])
+        _keep(findings, counts, {
+            "hostname": group_name,
+            "category": "Привилегированные группы",
+            "title": title,
+            "severity": severity,
+            "detail": f"Участников: {len(members)}. Первые: {names}. Список длиннее пяти в отчёт не копируется.",
+            "tags": "baseline,surface,module:baseline_hygiene",
+            "vuln_id": vuln_id,
+        })
+    admins = _safe_search(conn, base, "(&(objectClass=group)(cn=Domain Admins))", ["distinguishedName", "member"], 1)
+    if not admins:
+        return
+    members = [part for part in _values(admins[0], "member") if part]
+    if len(members) > 5:
+        _keep(findings, counts, {
+            "hostname": "Domain Admins",
+            "category": "Привилегированные группы",
+            "title": f"Администраторов домена {len(members)}",
+            "severity": "medium",
+            "detail": "Оставьте в группе постоянных администраторов не больше пяти. Остальных выносите во временные группы.",
+            "tags": "baseline,surface,module:baseline_hygiene",
+            "vuln_id": "admin_count",
+        })
+    group_dn = escape_filter_chars(str(_first(admins[0], "distinguishedName") or ""))
+    if not group_dn:
+        return
+    for flag, vuln_id, title, detail in (
+        (0, "admin_delegatable", "Администратора домена можно делегировать", "Включите «учетная запись важна и не может быть делегирована». Билет платформа не запрашивает."),
+        (_DONT_EXPIRE, "admin_password_never", "У администратора домена пароль не истекает", "Снимите флаг бессрочного пароля или уберите запись из Domain Admins. Пароль не читается."),
+    ):
+        extra = f"(userAccountControl:1.2.840.113556.1.4.803:={flag})" if flag else f"(!(userAccountControl:1.2.840.113556.1.4.803:={_NOT_DELEGATED}))"
+        rows = _safe_search(
+            conn,
+            base,
+            f"(&(objectCategory=person)(objectClass=user)(memberOf={group_dn}){extra}(!(userAccountControl:1.2.840.113556.1.4.803:={_DISABLE})))",
+            ["sAMAccountName"],
+            12,
+        )
+        for entry in rows:
+            _keep(findings, counts, {
+                "hostname": str(_first(entry, "sAMAccountName") or ""),
+                "category": "Привилегированные учетные записи",
+                "title": title,
+                "severity": "high",
+                "detail": detail,
+                "tags": "baseline,surface,module:baseline_hygiene",
+                "vuln_id": vuln_id,
+            })
 
 
 def _structure_ldap(conn: Connection, base: str, findings: list[dict[str, Any]], counts: dict[str, int]) -> None:
@@ -838,6 +979,392 @@ def _structure_ldap(conn: Connection, base: str, findings: list[dict[str, Any]],
             }, 5)
 
 
+_SD_CONTROL = ("1.2.840.113556.1.4.801", True, b"\x30\x03\x02\x01\x05")
+_OWNER_OK = {"S-1-5-18", "S-1-5-9", "S-1-5-32-544"}
+
+
+def _sid_at(blob: bytes, off: int) -> tuple[str, int]:
+    if off < 0 or off + 8 > len(blob):
+        return "", 0
+    count = blob[off + 1]
+    end = off + 8 + 4 * count
+    if count > 15 or end > len(blob):
+        return "", 0
+    auth = int.from_bytes(blob[off + 2:off + 8], "big")
+    parts = [str(int.from_bytes(blob[off + 8 + 4 * i:off + 12 + 4 * i], "little")) for i in range(count)]
+    sid = "S-1-" + str(auth) + ("-" + "-".join(parts) if parts else "")
+    return sid, end - off
+
+
+def _broad_label(sid: str) -> str:
+    names = {"S-1-1-0": "Everyone", "S-1-5-11": "Authenticated Users", "S-1-5-32-545": "Users"}
+    if sid in names:
+        return names[sid]
+    if sid.endswith("-513"):
+        return "Domain Users"
+    if sid.endswith("-515"):
+        return "Domain Computers"
+    return ""
+
+
+def _broad_aces(raw: Any) -> list[str]:
+    if isinstance(raw, list):
+        raw = raw[0] if raw else b""
+    try:
+        blob = bytes(raw)
+    except (TypeError, ValueError):
+        return []
+    if len(blob) < 20:
+        return []
+    start = int.from_bytes(blob[16:20], "little")
+    if start <= 0 or start + 8 > len(blob):
+        return []
+    count = int.from_bytes(blob[start + 4:start + 6], "little")
+    pos = start + 8
+    found: list[str] = []
+    for _ in range(min(count, 64)):
+        if pos + 8 > len(blob):
+            break
+        ace_type = blob[pos]
+        size = int.from_bytes(blob[pos + 2:pos + 4], "little")
+        mask = int.from_bytes(blob[pos + 4:pos + 8], "little")
+        if size < 8 or pos + size > len(blob):
+            break
+        if ace_type == 0:
+            sid, _ = _sid_at(blob, pos + 8)
+            label = _broad_label(sid)
+            right = ""
+            if mask & 0x10000000:
+                right = "полный доступ"
+            elif mask & 0x00040000:
+                right = "смена списка прав"
+            elif mask & 0x00080000:
+                right = "смена владельца"
+            elif mask & 0x40000000:
+                right = "запись"
+            if label and right:
+                found.append(f"{label}: {right}")
+        pos += size
+        if len(found) >= 3:
+            break
+    return found
+
+
+def _owner_sid(raw: Any) -> str:
+    if isinstance(raw, list):
+        raw = raw[0] if raw else b""
+    try:
+        blob = bytes(raw)
+    except (TypeError, ValueError):
+        return ""
+    if len(blob) < 8:
+        return ""
+    sid, _ = _sid_at(blob, int.from_bytes(blob[4:8], "little"))
+    return sid
+
+
+def _owner_allowed(sid: str) -> bool:
+    if not sid or sid in _OWNER_OK:
+        return True
+    return sid.endswith("-512") or sid.endswith("-516") or sid.endswith("-519") or sid.endswith("-544")
+
+
+def _depth_ldap(conn: Connection, base: str, findings: list[dict[str, Any]], counts: dict[str, int]) -> None:
+    """Глубокие признаки каталога. Анонимный вход только да или нет, данные через него не читаются."""
+    try:
+        probe = Connection(conn.server, user="", password="", authentication=SIMPLE, auto_bind=False, receive_timeout=8)
+        opened = bool(probe.bind())
+        probe.unbind()
+    except (LDAPException, OSError):
+        opened = False
+    if opened:
+        _keep(findings, counts, {
+            "hostname": base,
+            "category": "Харденинг",
+            "title": "Каталог принимает вход без учетной записи",
+            "severity": "high",
+            "detail": "Анонимная привязка LDAP завершилась успехом. Объекты через неё не читались. Закройте анонимные операции на контроллере.",
+            "tags": "baseline,surface,module:baseline_hygiene",
+            "vuln_id": "anonymous_ldap",
+        }, 1)
+    config = _config_base(conn)
+    if config:
+        service = _safe_search(conn, f"CN=Directory Service,CN=Windows NT,CN=Services,{config}", "(objectClass=nTDSService)", ["dsHeuristics"], 1)
+        if service:
+            raw = str(_first(service[0], "dsHeuristics") or "")
+            if len(raw) >= 7 and raw[6] == "2":
+                _keep(findings, counts, {
+                    "hostname": base,
+                    "category": "Харденинг",
+                    "title": "В dsHeuristics разрешены анонимные операции LDAP",
+                    "severity": "high",
+                    "detail": "Седьмой символ параметра равен 2. Это разрешение анонимных операций. Значение целиком в отчёт не копируется.",
+                    "tags": "baseline,surface,module:baseline_hygiene",
+                    "vuln_id": "ds_heuristics",
+                }, 1)
+        schema = ""
+        try:
+            conn.search("", "(objectClass=*)", search_scope=BASE, attributes=["schemaNamingContext"])
+            if conn.entries:
+                schema = str(_first(conn.entries[0], "schemaNamingContext") or "")
+        except LDAPException:
+            schema = ""
+        if schema and _safe_search(conn, schema, "(|(cn=javaContainer)(cn=javaNamingReference))", ["cn"], 2):
+            _keep(findings, counts, {
+                "hostname": base,
+                "category": "Харденинг",
+                "title": "В схеме есть классы Java",
+                "severity": "low",
+                "detail": "Старые классы Java в схеме расширяют каталог. Удалите их, если служба, которая их создала, уже не используется.",
+                "tags": "baseline,surface,module:baseline_hygiene",
+                "vuln_id": "java_schema",
+            }, 1)
+        menus = _safe_search(conn, f"CN=DisplaySpecifiers,{config}", "(lDAPDisplayName=user)", ["adminContextMenu"], 2)
+        if menus and _values(menus[0], "adminContextMenu"):
+            _keep(findings, counts, {
+                "hostname": base,
+                "category": "Харденинг",
+                "title": "У пользователя добавлен пункт контекстного меню",
+                "severity": "medium",
+                "detail": "В описании отображения пользователя есть дополнительная команда. Текст команды в отчёт не копируется. Оставьте только штатные пункты.",
+                "tags": "baseline,surface,module:baseline_hygiene",
+                "vuln_id": "display_menu",
+            }, 1)
+    for entry in _safe_search(conn, base, "(userAccountControl:1.2.840.113556.1.4.803:=33554432)", ["cn", "msDS-RevealOnDemandGroup", "msDS-NeverRevealGroup"], 8):
+        name = str(_first(entry, "cn") or "RODC")
+        _keep(findings, counts, {
+            "hostname": name,
+            "category": "Контроллеры",
+            "title": f"Контроллер только для чтения: {name}",
+            "severity": "low",
+            "detail": "В каталоге есть RODC. Пароли на него не копируются этой проверкой. Сверьте группы раскрытия ниже.",
+            "tags": "baseline,surface,module:baseline_hygiene",
+            "vuln_id": "rodc_present",
+        })
+        reveal = [_cn(str(item)) for item in _values(entry, "msDS-RevealOnDemandGroup")]
+        broad = [item for item in reveal if item.lower() in {"domain users", "everyone", "authenticated users", "domain computers", "users"}]
+        if broad:
+            _keep(findings, counts, {
+                "hostname": name,
+                "category": "Контроллеры",
+                "title": f"На {name} пароли может раскрывать широкая группа",
+                "severity": "high",
+                "detail": "В группе раскрытия: " + ", ".join(broad[:4]) + ". Оставьте там только узлы, которым нужен кэш пароля. Сами пароли не читаются.",
+                "tags": "baseline,surface,module:baseline_hygiene",
+                "vuln_id": "rodc_reveal",
+            })
+        never = {_cn(str(item)).lower() for item in _values(entry, "msDS-NeverRevealGroup")}
+        if "domain admins" not in never:
+            _keep(findings, counts, {
+                "hostname": name,
+                "category": "Контроллеры",
+                "title": f"На {name} нет запрета кэша Domain Admins",
+                "severity": "high",
+                "detail": "Группа Domain Admins не входит в список, который нельзя кэшировать на RODC. Добавьте её в этот список. Пароли не читаются.",
+                "tags": "baseline,surface,module:baseline_hygiene",
+                "vuln_id": "rodc_never",
+            })
+    for entry in _safe_search(conn, base, "(&(objectClass=computer)(sAMAccountName=AZUREADSSOACC$))", ["sAMAccountName", "pwdLastSet"], 2):
+        changed = _filetime(_first(entry, "pwdLastSet"))
+        age = (datetime.utcnow() - changed).days if changed else None
+        _keep(findings, counts, {
+            "hostname": "AZUREADSSOACC",
+            "category": "Учетные записи",
+            "title": "В домене есть учётная запись единого входа",
+            "severity": "medium",
+            "detail": "Компьютер AZUREADSSOACC отвечает за seamless SSO. Пароль не читается." + (f" Срок пароля {age} дн." if age is not None else ""),
+            "tags": "baseline,surface,module:baseline_hygiene",
+            "vuln_id": "azure_sso",
+        }, 1)
+    for entry in _safe_search(conn, base, "(unixUserPassword=*)", ["sAMAccountName"], 8):
+        _keep(findings, counts, {
+            "hostname": str(_first(entry, "sAMAccountName") or ""),
+            "category": "Учетные записи",
+            "title": "В каталоге заполнен пароль Unix",
+            "severity": "high",
+            "detail": "Атрибут unixUserPassword существует. Значение не читается и в отчёт не копируется. Очистите атрибут и храните секрет вне карточки.",
+            "tags": "baseline,surface,module:baseline_hygiene",
+            "vuln_id": "unix_password",
+        })
+    for entry in _safe_search(conn, base, "(objectClass=msDS-DelegatedManagedServiceAccount)", ["cn", "msDS-ManagedAccountPrecededByLink"], 8):
+        link = str(_first(entry, "msDS-ManagedAccountPrecededByLink") or "")
+        if not link:
+            continue
+        _keep(findings, counts, {
+            "hostname": str(_first(entry, "cn") or ""),
+            "category": "Учетные записи",
+            "title": "Делегированная служебная запись указывает на предшественника",
+            "severity": "high",
+            "detail": "Связь с предшественником даёт новой записи действовать от его имени после включения в схеме. Уберите связь, если миграция не идёт. Пароль не читается.",
+            "tags": "baseline,surface,module:baseline_hygiene",
+            "vuln_id": "dmsa_link",
+        })
+    upn_seen: dict[str, int] = {}
+    try:
+        pages = conn.extend.standard.paged_search(
+            search_base=base,
+            search_filter="(&(objectCategory=person)(objectClass=user)(userPrincipalName=*))",
+            search_scope=SUBTREE,
+            attributes=["userPrincipalName"],
+            paged_size=400,
+            size_limit=800,
+            generator=True,
+        )
+        for item in pages:
+            if not isinstance(item, dict) or item.get("type") != "searchResEntry":
+                continue
+            raw = (item.get("attributes") or {}).get("userPrincipalName")
+            upn = raw[0] if isinstance(raw, list) else raw
+            key = str(upn or "").strip().lower()
+            if key:
+                upn_seen[key] = upn_seen.get(key, 0) + 1
+    except (LDAPException, OSError, RuntimeError, ValueError):
+        upn_seen = {}
+    dupes = [(upn, count) for upn, count in upn_seen.items() if count >= 2][:8]
+    for upn, count in dupes:
+        _keep(findings, counts, {
+            "hostname": upn.split("@", 1)[0][:40],
+            "category": "Учетные записи",
+            "title": "Один UPN записан у нескольких учётных записей",
+            "severity": "medium",
+            "detail": f"Такое имя входа встречается {count} раз. Оставьте его одной записи.",
+            "tags": "baseline,surface,module:baseline_hygiene",
+            "vuln_id": "duplicate_upn",
+        })
+    for entry in _safe_search(
+        conn,
+        base,
+        f"(&(objectCategory=person)(objectClass=user)(userAccountControl:1.2.840.113556.1.4.803:=262144)(userAccountControl:1.2.840.113556.1.4.803:={_DONT_EXPIRE}))",
+        ["sAMAccountName"],
+        8,
+    ):
+        _keep(findings, counts, {
+            "hostname": str(_first(entry, "sAMAccountName") or ""),
+            "category": "Учетные записи",
+            "title": "Смарт-карта включена, а пароль не истекает",
+            "severity": "medium",
+            "detail": "Запись требует смарт-карту и одновременно не меняет пароль. Пароль не читается. Либо включите срок, либо уберите запись из привилегированного входа.",
+            "tags": "baseline,surface,module:baseline_hygiene",
+            "vuln_id": "smartcard_password",
+        })
+    krbtgt = _safe_search(conn, base, "(sAMAccountName=krbtgt)", ["msDS-SupportedEncryptionTypes"], 1)
+    if krbtgt:
+        try:
+            kinds = int(_first(krbtgt[0], "msDS-SupportedEncryptionTypes") or 0)
+        except (TypeError, ValueError):
+            kinds = 0
+        if kinds and not (kinds & 24):
+            _keep(findings, counts, {
+                "hostname": "krbtgt",
+                "category": "Харденинг",
+                "title": "У krbtgt не включены типы AES",
+                "severity": "high",
+                "detail": "В списке типов шифрования нет AES. Пароль и билеты не читаются. Включите AES128 и AES256.",
+                "tags": "baseline,surface,module:baseline_hygiene",
+                "vuln_id": "krbtgt_aes",
+            }, 1)
+    try:
+        conn.search(
+            base,
+            "(objectClass=organizationalUnit)",
+            search_scope=SUBTREE,
+            attributes=["cn", "nTSecurityDescriptor"],
+            size_limit=30,
+            controls=[_SD_CONTROL],
+        )
+        entries = list(conn.entries) if (conn.result or {}).get("description") in {"success", "sizeLimitExceeded"} else []
+    except (LDAPException, OSError, ValueError):
+        entries = []
+    for entry in entries:
+        try:
+            raw_sd = entry["nTSecurityDescriptor"].value
+        except Exception:
+            continue
+        rights = _broad_aces(raw_sd)
+        if not rights:
+            continue
+        _keep(findings, counts, {
+            "hostname": str(_first(entry, "cn") or ""),
+            "category": "Группы",
+            "title": "На подразделении широкое право у обычной группы",
+            "severity": "high",
+            "detail": "Найдено: " + "; ".join(rights) + ". Снимите это право. Полный список доступа в отчёт не копируется.",
+            "tags": "baseline,surface,module:baseline_hygiene",
+            "vuln_id": "dangerous_ou_right",
+        })
+    owners_filter = "(|(distinguishedName=" + escape_filter_chars("OU=Domain Controllers," + base) + ")(userAccountControl:1.2.840.113556.1.4.803:=8192))"
+    try:
+        conn.search(
+            base,
+            owners_filter,
+            search_scope=SUBTREE,
+            attributes=["cn", "nTSecurityDescriptor"],
+            size_limit=8,
+            controls=[_SD_CONTROL],
+        )
+        owned = list(conn.entries) if (conn.result or {}).get("description") in {"success", "sizeLimitExceeded"} else []
+    except (LDAPException, OSError, ValueError):
+        owned = []
+    for entry in owned:
+        try:
+            sid = _owner_sid(entry["nTSecurityDescriptor"].value)
+        except Exception:
+            continue
+        if _owner_allowed(sid):
+            continue
+        _keep(findings, counts, {
+            "hostname": name,
+            "category": "Контроллеры",
+            "title": "Владелец объекта контроллера не входит в штатные группы",
+            "severity": "medium",
+            "detail": "Владелец не Domain Admins, Enterprise Admins и не встроенные администраторы. Верните владельца штатной группе. Дескриптор целиком не копируется.",
+            "tags": "baseline,surface,module:baseline_hygiene",
+            "vuln_id": "dc_owner",
+        })
+
+
+def _trust_assessment(attributes: Any, trust_type: Any, direction: Any, encryption: Any = None) -> dict[str, Any]:
+    """Interpret public TDO metadata; never infer negotiated crypto or effective SID policy."""
+    def number(value: Any) -> int | None:
+        if value is None or value == "" or isinstance(value, bool):
+            return None
+        try:
+            result = int(value)
+            return result if 0 <= result <= 0xffffffff else None
+        except (TypeError, ValueError, OverflowError):
+            return None
+    flags, kind, flow, enc = map(number, (attributes, trust_type, direction, encryption))
+    issues: list[dict[str, str]] = []
+    def add(code: str, severity: str, title: str, detail: str) -> None:
+        issues.append({"code": code, "severity": severity, "title": title, "detail": detail})
+    within = bool(flags & 0x20) if flags is not None else None
+    forest = bool(flags & 0x8) if flags is not None else None
+    quarantine = bool(flags & 0x4) if flags is not None else None
+    selective = bool(flags & 0x10) if flags is not None else None
+    contradictory = within is True and forest is True
+    trust_kind = "неизвестно" if flags is None or kind is None or contradictory else "MIT Kerberos" if kind == 3 else "внутри леса" if within else "лес" if forest else "внешнее" if kind == 2 else "downlevel" if kind == 1 else "неизвестно"
+    # Quarantine is NOT a generic on/off switch for SID filtering at forest boundaries.
+    sid = "unknown" if flags is None or kind is None or contradictory else "quarantine" if quarantine else "within_forest" if within else "forest_boundary" if forest else "external_no_quarantine" if kind == 2 else "unknown"
+    if flags is None or kind is None or flow not in (1, 2, 3) or contradictory:
+        add("trust_metadata", "info", "Неполные или противоречивые атрибуты доверия", "Нельзя сделать заключение о безопасности без trustAttributes, trustType и trustDirection.")
+    if sid == "external_no_quarantine":
+        add("trust_sid_filter", "high", "Внешнее доверие без флага карантина SID", "trustType=2, WITHIN_FOREST и FOREST_TRANSITIVE не заданы, QUARANTINED_DOMAIN=0. Требуется проверка SIDHistory и направления доверия; это не доказательство эксплуатации.")
+    if forest and flags is not None and flags & 0x40:
+        add("trust_treat_external", "medium", "Доверие лесов помечено TREAT_AS_EXTERNAL", "Флаг 0x40 меняет обработку SID на границе лесов. Не означает полного отключения фильтрации; проверьте необходимость и SIDHistory.")
+    if (forest or trust_kind == "внешнее") and selective is False:
+        add("trust_selective_auth", "medium", "Не задан флаг selective authentication", "CROSS_ORGANIZATION=0. Проверьте допустимость широкой области аутентификации; доступ к ресурсам по одному флагу не определяется.")
+    if enc is not None and enc & 0x7 and not enc & 0x18:
+        add("trust_rc4", "high", "В атрибуте шифрования нет AES, задан DES/RC4", "msDS-SupportedEncryptionTypes содержит DES/RC4 без AES128/AES256. Это конфигурация TDO, а не наблюдение согласованного алгоритма.")
+    if kind == 3 and flags is not None and flags & 0x80:
+        add("trust_mit_rc4", "medium", "Для MIT-доверия задан USES_RC4_ENCRYPTION", "Флаг trustAttributes 0x80 применим к MIT-доверию; он не доказывает RC4-only для доверий AD.")
+    if flags is not None and flags & 0x800:
+        add("trust_tgt", "high", "Явно разрешено межорганизационное делегирование TGT", "CROSS_ORGANIZATION_ENABLE_TGT_DELEGATION=1. Проверьте необходимость; отсутствие DISABLE_TGT_DELEGATION само по себе не является доказательством разрешения.")
+    return {"kind": trust_kind, "trust_attributes": flags, "trust_type": kind, "direction_value": flow,
+            "supported_encryption_types": enc, "sid_filter": True if quarantine else False if sid == "external_no_quarantine" else None,
+            "sid_filter_mode": sid, "selective": selective, "non_transitive_flag": bool(flags & 1) if flags is not None else None,
+            "assessment": issues, "limitations": ["Только метаданные локального TDO; настройки партнёра и effective access не проверены.", "Нет проверки аутентификации, SIDHistory и фактически согласованного шифрования."]}
+
+
 def scan_trusts_ldap(connection: dict[str, Any]) -> dict[str, Any]:
     try:
         conn, base = connect(connection)
@@ -845,33 +1372,40 @@ def scan_trusts_ldap(connection: dict[str, Any]) -> dict[str, Any]:
         return {"ok": False, "findings": [], "score": None, "message": f"LDAPS/LDAP не открылся: {exc}"}
     findings: list[dict[str, Any]] = []
     try:
-        trusts = _search(conn, f"CN=System,{base}", "(objectClass=trustedDomain)", ["cn", "trustDirection", "trustAttributes"], 50)
+        trusts = _search(conn, f"CN=System,{base}", "(objectClass=trustedDomain)", ["cn", "trustDirection", "trustAttributes", "trustType", "msDS-SupportedEncryptionTypes", "whenChanged"], 50)
         directions = {"1": "входящее", "2": "исходящее", "3": "двустороннее"}
         for entry in trusts:
             name = str(_first(entry, "cn") or "")
-            try:
-                flags = int(_first(entry, "trustAttributes") or 0)
-            except (TypeError, ValueError):
-                flags = 0
-            kind = "Forest" if flags & 8 else "External"
-            sid_on = bool(flags & 4)
+            assessment = _trust_assessment(_first(entry, "trustAttributes"), _first(entry, "trustType"), _first(entry, "trustDirection"), _first(entry, "msDS-SupportedEncryptionTypes"))
             direction = directions.get(str(_first(entry, "trustDirection") or ""), "неизвестно")
-            missing = not sid_on
-            findings.append(
-                {
-                    "hostname": name,
-                    "category": "Доверительные отношения",
-                    "title": f"Фильтрация SID выключена: {name}" if missing else f"Доверие {name}: фильтрация SID включена",
-                    "severity": "critical" if missing else "info",
-                    "detail": f"{kind}, направление {direction}.",
-                    "tags": "trust,sid-filter,module:trusts",
-                    "vuln_id": "trust_sid_filter" if missing else "trust_ok",
-                }
-            )
+            issues = assessment["assessment"]
+            for issue in issues:
+                findings.append({"hostname": name, "category": "Доверительные отношения",
+                    "title": issue["title"] + ": " + name, "severity": issue["severity"],
+                    "detail": issue["detail"] + f" Направление: {direction}. trustAttributes={assessment['trust_attributes']}; trustType={assessment['trust_type']}; encryptionTypes={assessment['supported_encryption_types']}.",
+                    "tags": "trust,module:trusts", "vuln_id": issue["code"]})
+            if not issues:
+                findings.append({"hostname": name, "category": "Доверительные отношения", "title": "Метаданные доверия: " + name,
+                    "severity": "info", "detail": assessment["kind"] + ", " + direction + ". Явных отклонений по доступным атрибутам нет; безопасность доверия не подтверждена.",
+                    "tags": "trust,module:trusts", "vuln_id": "trust_metadata"})
+            changed = _first(entry, "whenChanged")
+            if isinstance(changed, datetime):
+                stamp = changed.replace(tzinfo=None) if changed.tzinfo else changed
+                age = (datetime.utcnow() - stamp).days
+                if age > 180:
+                    findings.append({
+                        "hostname": name,
+                        "category": "Доверительные отношения",
+                        "title": f"Доверие {name} не менялось {age} дн.",
+                        "severity": "low",
+                        "detail": "Давняя дата изменения сама по себе не рвёт доверие. Сверьте, что партнёр ещё нужен.",
+                        "tags": "trust,sid-filter,module:trusts",
+                        "vuln_id": "trust_inactive",
+                    })
     finally:
         conn.unbind()
-    bad = sum(1 for item in findings if item["severity"] == "critical")
-    return {"ok": True, "findings": findings, "score": None, "message": f"Доверий по LDAP: {len(findings)}, без фильтрации SID: {bad}."}
+    bad = sum(1 for item in findings if item["vuln_id"] == "trust_sid_filter")
+    return {"ok": True, "findings": findings, "score": None, "message": f"Доверий по LDAP: {len(trusts)}, отметок: {len(findings)}, внешних без карантина SID: {bad}."}
 
 
 def directory_picture(connection: dict[str, Any]) -> dict[str, Any]:
@@ -881,9 +1415,11 @@ def directory_picture(connection: dict[str, Any]) -> dict[str, Any]:
     except (LDAPException, OSError, RuntimeError) as exc:
         return {"ok": False, "message": f"Каталог не открылся: {exc}"}
     try:
-        domain = _safe_search(conn, base, "(objectClass=domainDNS)", ["msDS-Behavior-Version", "minPwdLength", "pwdHistoryLength", "lockoutThreshold", "maxPwdAge", "fSMORoleOwner"], 1)
+        domain = _safe_search(conn, base, "(objectClass=domainDNS)", ["msDS-Behavior-Version", "minPwdLength", "pwdHistoryLength", "lockoutThreshold", "maxPwdAge", "fSMORoleOwner", "gPLink", "gPOptions"], 1)
         level = ""
         policy = {"length": "", "history": "", "lockout": "", "max_age_days": ""}
+        domain_links: list[dict[str, Any]] = []
+        domain_block = False
         pdc = ""
         if domain:
             row = domain[0]
@@ -898,6 +1434,11 @@ def directory_picture(connection: dict[str, Any]) -> dict[str, Any]:
                 "max_age_days": _interval_days(_first(row, "maxPwdAge")),
             }
             pdc = _role_cn(str(_first(row, "fSMORoleOwner") or ""))
+            domain_links = _gplinks(str(_first(row, "gPLink") or ""))
+            try:
+                domain_block = bool(int(_first(row, "gPOptions") or 0) & 1)
+            except (TypeError, ValueError):
+                domain_block = False
         dcs = []
         for entry in _safe_search(conn, base, "(userAccountControl:1.2.840.113556.1.4.803:=8192)", ["cn", "dNSHostName", "operatingSystem"], 24):
             dcs.append({
@@ -913,11 +1454,11 @@ def directory_picture(connection: dict[str, Any]) -> dict[str, Any]:
             for entry in _safe_search(conn, site_base, "(objectClass=site)", ["cn"], 30):
                 sites.append({"name": str(_first(entry, "cn") or ""), "servers": []})
             known = {item["name"].lower(): item for item in sites}
-            for entry in _safe_search(conn, site_base, "(objectClass=server)", ["cn", "distinguishedName"], 40):
-                site_name = _site_of(str(_first(entry, "distinguishedName") or ""))
+            for entry in _safe_search(conn, site_base, "(objectClass=nTDSDSA)", ["distinguishedName"], 80):
+                server_name, site_name = _dc_site(str(_first(entry, "distinguishedName") or ""))
                 bucket = known.get(site_name.lower())
-                if bucket is not None:
-                    bucket["servers"].append(str(_first(entry, "cn") or ""))
+                if bucket is not None and server_name and server_name not in bucket["servers"]:
+                    bucket["servers"].append(server_name)
             for entry in _safe_search(conn, f"CN=Subnets,{site_base}", "(objectClass=subnet)", ["cn", "siteObject"], 60):
                 subnets.append({
                     "name": str(_first(entry, "cn") or ""),
@@ -936,14 +1477,23 @@ def directory_picture(connection: dict[str, Any]) -> dict[str, Any]:
                 break
         ous = []
         ou_nodes = []
-        for entry in _safe_search(conn, base, "(objectClass=organizationalUnit)", ["ou", "distinguishedName"], 80):
+        for entry in _safe_search(conn, base, "(objectClass=organizationalUnit)", ["ou", "distinguishedName", "gPLink", "gPOptions"], 80):
             dn = str(_first(entry, "distinguishedName") or "")
             chain = [part[3:] for part in dn.split(",") if part.upper().startswith("OU=")]
             name = chain[0] if chain else str(_first(entry, "ou") or "")
             if not name:
                 continue
+            try:
+                blocked = bool(int(_first(entry, "gPOptions") or 0) & 1)
+            except (TypeError, ValueError):
+                blocked = False
             ous.append(name)
-            ou_nodes.append({"name": name[:80], "path": "/".join(reversed(chain))[:220]})
+            ou_nodes.append({
+                "name": name[:80],
+                "path": "/".join(reversed(chain))[:220],
+                "blocked": blocked,
+                "links": _gplinks(str(_first(entry, "gPLink") or "")),
+            })
         domains = []
         if config:
             for entry in _safe_search(conn, f"CN=Partitions,{config}", "(objectClass=crossRef)", ["dnsRoot", "nCName", "systemFlags"], 24):
@@ -982,30 +1532,45 @@ def directory_picture(connection: dict[str, Any]) -> dict[str, Any]:
             })
         gpos = []
         flag_text = {0: "включена", 1: "выключена часть пользователя", 2: "выключена часть компьютера", 3: "выключена"}
-        for entry in _safe_search(conn, f"CN=Policies,CN=System,{base}", "(objectClass=groupPolicyContainer)", ["cn", "displayName", "flags"], 60):
+        for entry in _safe_search(conn, f"CN=Policies,CN=System,{base}", "(objectClass=groupPolicyContainer)", ["cn", "displayName", "flags", "gPCWQLFilter"], 60):
             try:
                 flags = int(_first(entry, "flags") or 0)
             except (TypeError, ValueError):
                 flags = 0
+            wmi_match = re.search(r"\{[0-9A-Fa-f-]+\}", str(_first(entry, "gPCWQLFilter") or ""))
             gpos.append({
                 "id": str(_first(entry, "cn") or ""),
                 "name": str(_first(entry, "displayName") or ""),
                 "state": flag_text.get(flags, "состояние не прочитано"),
+                "wmi": wmi_match.group(0) if wmi_match else "",
+            })
+        wmi_filters = []
+        for entry in _safe_search(conn, f"CN=SOM,CN=WMIPolicy,CN=System,{base}", "(objectClass=msWMI-Som)", ["msWMI-Name", "msWMI-Parm1", "msWMI-Parm2", "msWMI-ID"], 30):
+            wmi_filters.append({
+                "id": str(_first(entry, "msWMI-ID") or "")[:64],
+                "name": str(_first(entry, "msWMI-Name") or "")[:80],
+                "note": str(_first(entry, "msWMI-Parm1") or "")[:160],
+                "query": str(_first(entry, "msWMI-Parm2") or "")[:180],
+            })
+        service_accounts = []
+        for entry in _safe_search(conn, base, "(|(objectClass=msDS-GroupManagedServiceAccount)(objectClass=msDS-ManagedServiceAccount))", ["cn", "sAMAccountName", "dNSHostName", "userAccountControl", "objectClass"], 40):
+            classes = _values(entry, "objectClass")
+            try:
+                uac = int(_first(entry, "userAccountControl") or 0)
+            except (TypeError, ValueError):
+                uac = 0
+            service_accounts.append({
+                "name": str(_first(entry, "cn") or _first(entry, "sAMAccountName") or "")[:80],
+                "host": str(_first(entry, "dNSHostName") or "")[:80],
+                "kind": "gMSA" if any(str(item).lower() == "msds-groupmanagedserviceaccount" for item in classes) else "MSA",
+                "disabled": bool(uac & 2),
             })
         trusts = []
         directions = {"1": "входящее", "2": "исходящее", "3": "двустороннее"}
-        for entry in _safe_search(conn, f"CN=System,{base}", "(objectClass=trustedDomain)", ["cn", "trustDirection", "trustAttributes"], 20):
-            try:
-                flags = int(_first(entry, "trustAttributes") or 0)
-            except (TypeError, ValueError):
-                flags = 0
-            trusts.append({
-                "name": str(_first(entry, "cn") or ""),
-                "direction": directions.get(str(_first(entry, "trustDirection") or ""), "неизвестно"),
-                "kind": "лес" if flags & 8 else "внешнее",
-                "sid_filter": bool(flags & 4),
-                "selective": bool(flags & 16) and not bool(flags & 32),
-            })
+        for entry in _safe_search(conn, f"CN=System,{base}", "(objectClass=trustedDomain)", ["cn", "trustDirection", "trustAttributes", "trustType", "msDS-SupportedEncryptionTypes"], 20):
+            assessment = _trust_assessment(_first(entry, "trustAttributes"), _first(entry, "trustType"), _first(entry, "trustDirection"), _first(entry, "msDS-SupportedEncryptionTypes"))
+            trusts.append({"name": str(_first(entry, "cn") or ""),
+                "direction": directions.get(str(_first(entry, "trustDirection") or ""), "неизвестно"), **assessment})
         roles = [item for item in (pdc, _role_cn(_owner(conn, f"CN=RID Manager$,CN=System,{base}")), _role_cn(_owner(conn, f"CN=Infrastructure,CN=System,{base}"))) if item]
         return {
             "ok": True,
@@ -1024,6 +1589,10 @@ def directory_picture(connection: dict[str, Any]) -> dict[str, Any]:
             "domains": domains,
             "groups": groups,
             "gpos": gpos,
+            "wmi": wmi_filters,
+            "service_accounts": service_accounts,
+            "domain_links": domain_links,
+            "domain_block": domain_block,
             "trusts": trusts,
         }
     finally:
@@ -1051,6 +1620,19 @@ def _owner(conn: Connection, base: str) -> str:
     if not rows:
         return ""
     return str(_first(rows[0], "fSMORoleOwner") or "")
+
+
+def _dc_site(dn: str) -> tuple[str, str]:
+    """Имя контроллера и сайт из DN объекта NTDS Settings. Сервер без этой службы контроллером не считается."""
+    parts = [part for part in dn.split(",") if part]
+    server = ""
+    site = ""
+    for index, part in enumerate(parts):
+        if part.upper().startswith("CN=NTDS SETTINGS") and index + 1 < len(parts) and parts[index + 1].upper().startswith("CN="):
+            server = parts[index + 1][3:]
+        if part.upper() == "CN=SERVERS" and index + 1 < len(parts) and parts[index + 1].upper().startswith("CN="):
+            site = parts[index + 1][3:]
+    return server, site
 
 
 def _site_of(dn: str) -> str:
@@ -1117,6 +1699,8 @@ def scan_hardening_ldap(connection: dict[str, Any]) -> dict[str, Any]:
 
 _CLIENT_AUTH = "1.3.6.1.5.5.7.3.2"
 _SMART_CARD = "1.3.6.1.4.1.311.20.2.2"
+_ANY_PURPOSE = "2.5.29.37.0"
+_ENROLL_AGENT = "1.3.6.1.4.1.311.20.2.1"
 
 
 def _as_int(entry: Any, name: str) -> int:
@@ -1139,7 +1723,7 @@ def scan_adcs_ldap(connection: dict[str, Any]) -> dict[str, Any]:
     """Шаблоны из раздела конфигурации. Только флаги и EKU, без прав выпуска и без запросов в центр сертификации."""
     secret = str(connection.get("password") or "")
     try:
-        conn, _base = connect(connection)
+        conn, domain_base = connect(connection)
     except (LDAPException, OSError, RuntimeError) as exc:
         text = str(exc).replace(secret, "") if secret else str(exc)
         return {"ok": False, "findings": [], "score": None, "message": f"LDAP не открылся: {text}"[:500]}
@@ -1154,7 +1738,7 @@ def scan_adcs_ldap(connection: dict[str, Any]) -> dict[str, Any]:
                 templates,
                 "(objectClass=pKICertificateTemplate)",
                 search_scope=SUBTREE,
-                attributes=["cn", "displayName", "msPKI-Certificate-Name-Flag", "msPKI-Enrollment-Flag", "pKIExtendedKeyUsage"],
+                attributes=["cn", "displayName", "msPKI-Certificate-Name-Flag", "msPKI-Enrollment-Flag", "pKIExtendedKeyUsage", "msPKI-Minimal-Key-Size", "msPKI-Template-Schema-Version"],
                 size_limit=400,
             )
         except LDAPException as exc:
@@ -1202,6 +1786,141 @@ def scan_adcs_ldap(connection: dict[str, Any]) -> dict[str, Any]:
             )
             if len(findings) >= 40:
                 break
+        for entry in rows:
+            if len(findings) >= 40:
+                break
+            cn = str(_first(entry, "cn") or "template")
+            title = str(_first(entry, "displayName") or cn).replace("|", "/")
+            key_size = _as_int(entry, "msPKI-Minimal-Key-Size")
+            name_flag = _as_int(entry, "msPKI-Certificate-Name-Flag")
+            enroll_flag = _as_int(entry, "msPKI-Enrollment-Flag")
+            eku = _as_list(entry, "pKIExtendedKeyUsage")
+            auth = _CLIENT_AUTH in eku or _SMART_CARD in eku
+            if 0 < key_size < 2048:
+                findings.append({
+                    "hostname": str(connection.get("host") or ""),
+                    "category": "AD CS",
+                    "title": f"Шаблон {title}: короткий ключ",
+                    "severity": "medium",
+                    "detail": f"Минимальная длина ключа шаблона {cn} меньше 2048. Сертификат не выпускается и открытый ключ не копируется.",
+                    "tags": "compliance,adcs,module:ad_cs",
+                    "vuln_id": "adcs_weak_key",
+                })
+            if auth and (name_flag & 0x80000):
+                findings.append({
+                    "hostname": str(connection.get("host") or ""),
+                    "category": "AD CS",
+                    "title": f"Шаблон {title}: нет расширения безопасности",
+                    "severity": "high",
+                    "detail": f"Шаблон {cn} выдаёт сертификат входа и не добавляет расширение безопасности. Закрытый ключ не читается.",
+                    "tags": "compliance,adcs,module:ad_cs",
+                    "vuln_id": "adcs_no_sid_ext",
+                })
+            schema_version = _as_int(entry, "msPKI-Template-Schema-Version")
+            if schema_version == 1 and (name_flag & 1):
+                findings.append({
+                    "hostname": str(connection.get("host") or ""),
+                    "category": "AD CS",
+                    "title": f"Шаблон {title}: старая схема и имя от заявителя",
+                    "severity": "high",
+                    "detail": f"Шаблон {cn} первой версии схемы разрешает имя субъекта от заявителя. Сертификат не выпускается.",
+                    "tags": "compliance,adcs,module:ad_cs",
+                    "vuln_id": "adcs_schema_v1",
+                })
+            if _ANY_PURPOSE in eku or cn.lower() in {"subca", "subordinateca"}:
+                findings.append({
+                    "hostname": str(connection.get("host") or ""),
+                    "category": "AD CS",
+                    "title": f"Шаблон {title}: слишком широкое назначение",
+                    "severity": "high",
+                    "detail": f"Шаблон {cn} разрешает любое назначение или выпуск подчиненного центра. Согласование и право выпуска сузьте. Сертификат не запрашивается.",
+                    "tags": "compliance,adcs,module:ad_cs",
+                    "vuln_id": "adcs_any_purpose",
+                })
+            if _ENROLL_AGENT in eku and (enroll_flag & 2) == 0:
+                findings.append({
+                    "hostname": str(connection.get("host") or ""),
+                    "category": "AD CS",
+                    "title": f"Шаблон {title}: агент подачи заявок без согласования",
+                    "severity": "high",
+                    "detail": f"Шаблон {cn} содержит назначение агента подачи и не требует ручного выпуска. Сертификат от имени другого человека не запрашивается.",
+                    "tags": "compliance,adcs,module:ad_cs",
+                    "vuln_id": "adcs_enroll_agent",
+                })
+        services = "CN=Enrollment Services,CN=Public Key Services,CN=Services," + config
+        try:
+            conn.search(services, "(objectClass=pKIEnrollmentService)", search_scope=SUBTREE, attributes=["cn", "msPKI-Enrollment-Servers"], size_limit=20)
+            for entry in list(conn.entries):
+                blob = " ".join(_as_list(entry, "msPKI-Enrollment-Servers")).lower()
+                if "http://" not in blob:
+                    continue
+                findings.append({
+                    "hostname": str(connection.get("host") or ""),
+                    "category": "AD CS",
+                    "title": "Выпуск сертификатов разрешён по HTTP",
+                    "severity": "medium",
+                    "detail": "У центра сертификации " + str(_first(entry, "cn") or "") + " в строке выпуска есть адрес без TLS. Сам адрес в отчёт не копируется. Сертификат не запрашивается.",
+                    "tags": "compliance,adcs,module:ad_cs",
+                    "vuln_id": "adcs_http",
+                })
+                if len(findings) >= 40:
+                    break
+        except LDAPException:
+            pass
+        oid_base = "CN=OID,CN=Public Key Services,CN=Services," + config
+        for entry in _safe_search(conn, oid_base, "(msDS-OIDToGroupLink=*)", ["cn", "displayName"], 12):
+            if len(findings) >= 40:
+                break
+            title = str(_first(entry, "displayName") or _first(entry, "cn") or "OID")
+            findings.append({
+                "hostname": str(connection.get("host") or ""),
+                "category": "AD CS",
+                "title": f"Политика выпуска {title} связана с группой",
+                "severity": "high",
+                "detail": "Идентификатор политики выпуска указывает на группу каталога. Членство в этой группе не копируется. Уберите связь, если группа не должна получать права от сертификата.",
+                "tags": "compliance,adcs,module:ad_cs",
+                "vuln_id": "adcs_oid_group",
+            })
+        if domain_base:
+            for entry in _safe_search(conn, domain_base, "(&(objectCategory=person)(altSecurityIdentities=*))", ["sAMAccountName"], 12):
+                if len(findings) >= 40:
+                    break
+                findings.append({
+                    "hostname": str(_first(entry, "sAMAccountName") or ""),
+                    "category": "AD CS",
+                    "title": "У записи задано явное сопоставление сертификата",
+                    "severity": "medium",
+                    "detail": "Атрибут altSecurityIdentities заполнен. Само сопоставление в отчёт не копируется. Оставьте его только там, где сертификат сознательно привязан к человеку.",
+                    "tags": "compliance,adcs,module:ad_cs",
+                    "vuln_id": "adcs_explicit_map",
+                })
+        for base_dn, vuln_id, title in (
+            (templates, "adcs_template_acl", "На шаблоне сертификата широкое право"),
+            (services, "adcs_ca_acl", "На центре сертификации широкое право"),
+        ):
+            try:
+                conn.search(base_dn, "(objectClass=*)", search_scope=LEVEL, attributes=["cn", "nTSecurityDescriptor"], size_limit=30, controls=[_SD_CONTROL])
+                secured = list(conn.entries) if (conn.result or {}).get("description") in {"success", "sizeLimitExceeded"} else []
+            except (LDAPException, OSError, ValueError):
+                secured = []
+            for entry in secured:
+                if len(findings) >= 40:
+                    break
+                try:
+                    rights = _broad_aces(entry["nTSecurityDescriptor"].value)
+                except Exception:
+                    continue
+                if not rights:
+                    continue
+                findings.append({
+                    "hostname": str(connection.get("host") or ""),
+                    "category": "AD CS",
+                    "title": title,
+                    "severity": "high",
+                    "detail": str(_first(entry, "cn") or "") + ": " + "; ".join(rights) + ". Полный список доступа не копируется. Сертификат не выпускается.",
+                    "tags": "compliance,adcs,module:ad_cs",
+                    "vuln_id": vuln_id,
+                })
         if findings:
             message = f"Рискованных шаблонов AD CS: {len(findings)}. Прочитано шаблонов по LDAP: {len(rows)}."
         else:

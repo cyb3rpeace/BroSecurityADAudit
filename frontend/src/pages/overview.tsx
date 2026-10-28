@@ -28,7 +28,7 @@ export function Overview() {
     ["Привязка канала", "ldap_channel_binding"],
     ["Время", "time_skew"],
     ["WebClient", "webclient_running"],
-  ].map(([label, id]) => ({ label, open: rows.some((row) => row.vuln_id === id) }))
+  ].map(([label, id]) => ({ label, row: rows.find((row) => row.vuln_id === id) }))
   const slices = order.map((key, index) => ({ name: t("sev." + key), value: rows.filter((row) => row.severity === key).length, fill: colors.donut[index] }))
   const top = rows
     .filter((row) => matchesQuery(row, filters.q) && (!filters.tactic || row.tactic === filters.tactic))
@@ -107,10 +107,10 @@ export function Overview() {
           <CardHeader><CardTitle>Контроллер в текущих инцидентах</CardTitle></CardHeader>
           <CardContent className="grid gap-2 text-sm">
             {health.map((item) => (
-              <div key={item.label} className="flex items-center justify-between rounded-lg border px-3 py-2">
+              <button key={item.label} type="button" disabled={!item.row} className="hover:bg-muted/40 flex items-center justify-between rounded-lg border px-3 py-2 text-left disabled:cursor-default disabled:hover:bg-transparent" onClick={() => { if (item.row) void openFinding(item.row) }}>
                 <span>{item.label}</span>
-                <span className={item.open ? "text-red-600 dark:text-red-400" : "text-muted-foreground"}>{item.open ? "есть отклонение" : "не отмечено"}</span>
-              </div>
+                <span className={item.row ? "text-red-600 dark:text-red-400" : "text-muted-foreground"}>{item.row ? "есть отклонение" : "не отмечено"}</span>
+              </button>
             ))}
             <p className="text-muted-foreground text-xs">«Не отмечено» значит, что такого инцидента нет в текущем каталоге. Это не заменяет повторную проверку, если модуль ещё не запускали.</p>
           </CardContent>

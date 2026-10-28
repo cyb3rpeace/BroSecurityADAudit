@@ -1,5 +1,130 @@
 export const RELEASES = [
   {
+    version: "2.6.24",
+    ru: [
+      "Threat Hunting показывает по умолчанию только высокоинформативные подозрительные события: обфусцированные и подозрительные команды, опасные службы и задачи, аномальные связи родитель–потомок и подтверждённые корреляции.",
+      "Обычные AppData/Temp-пути, фоновые службы и публичные адреса остаются доступными в полном контексте, но не создают ложный вердикт компрометации или C2.",
+      "AI-триаж анализирует полный inventory находок, разделяет факты, гипотезы, альтернативные объяснения и пробелы и обязан ссылаться на точные строки доказательств.",
+      "Добавлена детерминированная межхостовая корреляция с двусторонними ссылками на SHA-256 и доменные учётные записи; локальные и встроенные идентичности исключены из связей.",
+      "Сборщики и задания защищены ограничениями объёма, tenant-изоляцией и fail-closed проверками; неподтверждённые Windows event-источники не упаковываются.",
+      "Настрой LDAP/LDAPS и приступай к сканированию!",
+    ],
+    en: [
+      "Threat Hunting defaults to high-fidelity suspicious behavior: obfuscated and suspicious commands, risky services and tasks, anomalous parent-child execution, and corroborated correlations.",
+      "Routine AppData/Temp paths, background services, and public endpoints remain available in full context but do not create a compromise or C2 verdict by themselves.",
+      "AI triage analyzes the complete finding inventory, separates facts, hypotheses, alternatives, and gaps, and must cite exact evidence rows.",
+      "Deterministic cross-host correlation now requires bilateral SHA-256 or domain-identity evidence; local and built-in principals are excluded.",
+      "Collectors and jobs enforce bounded budgets, tenant isolation, and fail-closed checks; unverified Windows event sources are not packaged.",
+      "Set LDAP or LDAPS and start the scan.",
+    ],
+  },
+
+  {
+    version: "2.6.23",
+    ru: [
+      "С обзора каталога убран служебный список покрытия отчётов. Кольцо состава и полосы систем контроллеров остались.",
+      "В карточках шаблонов AD CS написано, чем мисконфигурация кончается для домена. Команд и выпуска сертификата нет.",
+      "В справочнике есть описания проверок, которые попали в последнее сканирование, включая шаблоны и программы удалённого доступа.",
+      "Расписание умеет запускать проверку каждый час, на выбранной минуте.",
+      "Письмо с итогом больше не уходит на заглушку @company.local. Пустой адрес компании заменяется ящиком SMTP.",
+      "Настрой LDAP/LDAPS и приступай к сканированию!",
+    ],
+    en: [
+      "The catalog coverage list is gone. The composition ring and controller OS bars stay.",
+      "AD CS cards explain the outcome of a template misconfiguration. There are no commands and no certificate is issued.",
+      "The handbook covers the checks from the latest scan, including templates and remote-access software.",
+      "The schedule can run a scan every hour, at a chosen minute.",
+      "Result mail no longer goes to a @company.local placeholder. An empty company address uses the SMTP mailbox.",
+      "Set LDAP or LDAPS and start the scan.",
+    ],
+  },
+  {
+    version: "2.6.22",
+    ru: [
+      "На обзоре каталога появились кольцо состава и полосы ОС контроллеров. Доля открывает свою вкладку.",
+      "Проверки AD CS закрывают читаемые признаки шаблонов, прав, сопоставления и настроек центра. Сертификат не выпускается.",
+      "Примечания к обновлению листаются по 10 записей. Кнопка «Назад» в браузере возвращает предыдущий раздел консоли.",
+      "Список опасных программ на хостах расширен по открытым отчётам: RAT, стилеры, RMM и личные VPN. Совпадение идёт по имени установленной программы.",
+      "Настрой LDAP/LDAPS и приступай к сканированию!",
+    ],
+    en: [
+      "The catalog overview shows a composition ring and controller OS bars. A slice opens its tab.",
+      "AD CS checks cover readable template, permission, mapping, and CA settings. No certificate is issued.",
+      "Release notes page through 10 rows. The browser Back button returns to the previous console section.",
+      "The host software list is wider: RATs, stealers, RMM, and personal VPNs, matched by the installed program name.",
+      "Set LDAP or LDAPS and start the scan.",
+    ],
+  },
+  {
+    version: "2.6.21",
+    ru: [
+      "Гигиена и доверия читают более глубокие признаки каталога: анонимный вход без чтения объектов, RODC, права на подразделения, шаблоны сертификатов, доверия AES и служебные записи.",
+      "В справочнике у проверок каталога, DNS, репликации и политик есть отдельное описание. Пароли, билеты и база по-прежнему не читаются.",
+      "На карточке контроллера видны дни с загрузки и отметка старого обновления Kerberos для версий старше Windows 10.",
+      "Настрой LDAP/LDAPS и приступай к сканированию!",
+    ],
+    en: [
+      "Hygiene and trusts read deeper directory signs: anonymous bind without listing objects, RODC, OU rights, certificate templates, AES trusts, and service accounts.",
+      "The handbook now describes directory, DNS, replication, and policy checks. Passwords, tickets, and the database stay unread.",
+      "A controller card shows days since boot and the old Kerberos update mark on Windows versions before 10.",
+      "Set LDAP or LDAPS and start the scan.",
+    ],
+  },
+  {
+    version: "2.6.20",
+    ru: [
+      "Оформление страниц снова прежнее. Номер версии открывает историю. Отклонение контроллера на обзоре открывает инцидент.",
+      "Гигиена читает ещё восемь признаков из каталога оценки: основная группа, контейнер по умолчанию, привилегированные группы и бессрочный пароль администратора.",
+      "Настрой LDAP/LDAPS и приступай к сканированию!",
+    ],
+    en: [
+      "Page styling is back to the previous look. The version number opens the history. A controller deviation on the overview opens the incident.",
+      "Hygiene reads eight more assessment signs: primary group, default container, privileged groups, and a domain admin password that never expires.",
+      "Set LDAP or LDAPS and start the scan.",
+    ],
+  },
+  {
+    version: "2.6.19",
+    ru: [
+      "Учётные записи и устройства фильтруются по типу объекта. Статус инцидента берётся в работу кнопкой в строке.",
+      "Страницы получили шапку и карточки в духе отчётов оценки, в цветах текущей темы.",
+      "Настрой LDAP/LDAPS и приступай к сканированию!",
+    ],
+    en: [
+      "Accounts and devices filter by object type. An incident status is taken into work from the row button.",
+      "Pages use the assessment-report header and cards, in the colors of the current theme.",
+      "Set LDAP or LDAPS and start the scan.",
+    ],
+  },
+  {
+    version: "2.6.18",
+    ru: [
+      "Каталог закрывает частичные области: размер базы, тома, gMSA, привязки политик, очистка DNS, доступность доверия, WMI и линия безопасности.",
+      "Пять тестов dcdiag идут на каждом ответившем контроллере. Журнал целиком не сохраняется.",
+      "Настрой LDAP/LDAPS и приступай к сканированию!",
+    ],
+    en: [
+      "The catalog closes the partial areas: database file size, volumes, gMSA, policy links, DNS scavenging, trust reachability, WMI, and a short security baseline.",
+      "Five dcdiag tests run on every controller that answers. The full log is not stored.",
+      "Set LDAP or LDAPS and start the scan.",
+    ],
+  },
+  {
+    version: "2.6.17",
+    ru: [
+      "В каждом письме есть кнопка «Перейти в платформу». Адрес берётся из APP_PUBLIC_URL.",
+      "Карта сайта показывает только контроллеры домена. Сервер без службы NTDS в этот список не попадает.",
+      "Excel и PDF собираются по фильтрам открытой вкладки. На вкладке «Отчеты» можно отметить модули проверки.",
+      "Настрой LDAP/LDAPS и приступай к сканированию!",
+    ],
+    en: [
+      "Every letter has an Open platform button. The address comes from APP_PUBLIC_URL.",
+      "The site map lists domain controllers only. A server without the NTDS service stays off that list.",
+      "Excel and PDF follow the filters on the open tab. The Reports tab lets you pick the check modules.",
+      "Set LDAP or LDAPS and start the scan.",
+    ],
+  },
+  {
     version: "2.6.16",
     ru: [
       "Граф и загрузка архива убраны. Пути атак остаются из проверок LDAP: делегирование, SPN, шаблоны сертификатов и опасные права.",

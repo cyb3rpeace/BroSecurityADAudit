@@ -21,19 +21,22 @@ export function Severity({ row, theme }: { row: Finding; theme: Theme }) {
 export function StatusButton({ row }: { row: Finding }) {
   const { t, bumpStatus, statusTick } = useApp()
   void statusTick
+  const order = ["open", "investigating", "closed"]
   const key = rowStatus(row)
+  const next = order[(Math.max(0, order.indexOf(key)) + 1) % order.length]
   return (
     <Button
       type="button"
       size="sm"
       variant="outline"
+      title={t("st.hint")}
       onClick={(event) => {
         event.stopPropagation()
         cycleStatus(row.id)
         bumpStatus()
       }}
     >
-      {t("st." + key)}
+      {t("st." + key)} → {t("st." + next)}
     </Button>
   )
 }

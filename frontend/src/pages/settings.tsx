@@ -59,8 +59,8 @@ const WINRM = [
 export function Settings() {
   const { t, me, company, companyId, reload, setCompany } = useApp()
   const [form, setForm] = useState<Form | null>(company ? fromCompany(company) : null)
-  useEffect(() => { if (company) setForm(fromCompany(company)) }, [company])
-  if (!form) return <PageHead title={t("nav.settings")} sub={t("empty.company")} />
+  useEffect(() => { setForm(company ? fromCompany(company) : null) }, [company])
+  if (!company || company.id !== companyId || !form) return <PageHead title={t("nav.settings")} sub={t("empty.company")} />
   const fields = form
 
   function set<K extends keyof Form>(key: K, value: Form[K]) {
@@ -100,6 +100,7 @@ export function Settings() {
                 <Input value={form.name} disabled={!me?.is_superadmin} placeholder="Название компании" onChange={(event) => set("name", event.target.value)} />
                 <Input value={form.domain} placeholder="Домен DNS" onChange={(event) => set("domain", event.target.value)} />
                 <Input value={form.notify_email} placeholder="Почта для отчета этой компании" onChange={(event) => set("notify_email", event.target.value)} />
+                <p className="text-muted-foreground text-xs">Если поле пустое, итог уходит на ящик, которым консоль входит на SMTP. Заглушки вроде @local и @company.local не используются.</p>
               </CardContent>
             </Card>
             <Card>
@@ -120,7 +121,7 @@ export function Settings() {
                 <Button onClick={() => void saveCompany()}>{t("save")}</Button>
               </CardContent>
             </Card>
-            {me?.is_superadmin ? <div className="lg:col-span-2"><Channels /></div> : null}
+            {me?.is_superadmin ? <div className="lg:col-span-2"><Channels key={companyId ?? "none"} companyId={companyId} /></div> : null}
             <Card>
               <CardHeader className="pb-2"><CardTitle className="text-base">Тенанты и пользователи</CardTitle></CardHeader>
               <CardContent>
@@ -142,13 +143,19 @@ export function Settings() {
   )
 }
 
-function Channels() {
+function Channels({ companyId }: { companyId: number | null }) {
+  const [notifyReady, setNotifyReady] = useState(false)
+  const scoped = (path: string) => `${path}?company_id=${companyId}`
   const [mail, setMail] = useState({ smtp_server: "", smtp_port: "587", smtp_security: "starttls", smtp_user: "", smtp_password: "", smtp_from: "", test_to: "", pass_set: "" })
   const [tg, setTg] = useState({ token: "", chat: "", proxy: "", token_set: "" })
   const [ai, setAi] = useState({ enabled: false, api_url: "", model_name: "", api_key: "", note: "" })
 
   useEffect(() => {
-    void api<Record<string, string | number | boolean>>("/api/notifications").then((data) => {
+    let active = true
+    if (!companyId) return
+    void api<Record<string, string | number | boolean>>(scoped("/api/notifications")).then((data) => {
+      if (!active) return
+      setNotifyReady(true)
       setMail((current) => ({
         ...current,
         smtp_server: String(data.smtp_server || ""),
@@ -164,7 +171,8 @@ function Channels() {
       const note = { saved: "Ключ сохранен в настройках", env: "Сейчас используется ключ, заданный на сервере.", none: "Ключ еще не задан" }[data.api_key_source] || "Ключ еще не задан"
       setAi((current) => ({ ...current, enabled: !!data.enabled, api_url: data.api_url || "", model_name: data.model_name || "", note }))
     }).catch(() => undefined)
-  }, [])
+    return () => { active = false }
+  }, [companyId])
 
   function notifyBody() {
     return {
@@ -181,14 +189,16 @@ function Channels() {
   }
 
   async function saveNotify(ok: string) {
-    await api("/api/notifications", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(notifyBody()) })
+    if (!companyId || !notifyReady) throw new Error("Дождитесь загрузки настроек выбранной компании")
+    await api(scoped("/api/notifications"), { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(notifyBody()) })
     toast.success(ok)
   }
 
+  if (!notifyReady) return <p role="status" className="text-sm text-muted-foreground">Загрузка каналов выбранной компании…</p>
   return (
     <div className="grid gap-3 xl:grid-cols-2">
       <Card>
-        <CardHeader><CardTitle>Корпоративная почта</CardTitle></CardHeader>
+        <CardHeader><CardTitle>Корпоративная почта выбранной компании</CardTitle></CardHeader>
         <CardContent className="grid gap-2">
           <Input value={mail.smtp_server} placeholder="SMTP-сервер" onChange={(event) => setMail({ ...mail, smtp_server: event.target.value })} />
           <div className="grid gap-2 sm:grid-cols-2">
@@ -209,7 +219,7 @@ function Channels() {
           <Input value={mail.test_to} placeholder="Куда отправить проверочное письмо" onChange={(event) => setMail({ ...mail, test_to: event.target.value })} />
           <div className="flex gap-2">
             <Button onClick={() => void saveNotify("Почта сохранена").catch((error: unknown) => toast.error(error instanceof Error ? error.message : "Почта не сохранилась"))}>Сохранить почту</Button>
-            <Button variant="outline" onClick={() => void saveNotify("Почта сохранена").then(() => api("/api/notifications/test-mail", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ recipient: mail.test_to.trim() }) })).then(() => toast.success("Проверочное письмо отправлено")).catch((error: unknown) => toast.error(error instanceof Error ? error.message : "Письмо не ушло"))}>Проверить</Button>
+            <Button variant="outline" onClick={() => void saveNotify("Почта сохранена").then(() => api(scoped("/api/notifications/test-mail"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ recipient: mail.test_to.trim() }) })).then(() => toast.success("Проверочное письмо отправлено")).catch((error: unknown) => toast.error(error instanceof Error ? error.message : "Письмо не ушло"))}>Проверить</Button>
           </div>
         </CardContent>
       </Card>
@@ -225,7 +235,7 @@ function Channels() {
           <Input value={tg.proxy} placeholder="203.0.113.10:3128" onChange={(event) => setTg({ ...tg, proxy: event.target.value })} />
           <div className="flex gap-2">
             <Button onClick={() => void saveNotify("Telegram сохранен").catch((error: unknown) => toast.error(error instanceof Error ? error.message : "Telegram не сохранился"))}>Сохранить Telegram</Button>
-            <Button variant="outline" onClick={() => void saveNotify("Telegram сохранен").then(() => api("/api/notifications/test-telegram", { method: "POST" })).then(() => toast.success("Проверочное сообщение ушло в Telegram")).catch((error: unknown) => toast.error(error instanceof Error ? error.message : "Telegram не ответил"))}>Проверить</Button>
+            <Button variant="outline" onClick={() => void saveNotify("Telegram сохранен").then(() => api(scoped("/api/notifications/test-telegram"), { method: "POST" })).then(() => toast.success("Проверочное сообщение ушло в Telegram")).catch((error: unknown) => toast.error(error instanceof Error ? error.message : "Telegram не ответил"))}>Проверить</Button>
           </div>
         </CardContent>
       </Card>

@@ -7,7 +7,10 @@ import html
 import json
 import logging
 import os
+import os
 import re
+import secrets
+import sqlite3
 import threading
 import time
 from datetime import datetime
@@ -46,6 +49,7 @@ from app.database import (
     Inventory,
     AssistantSettings,
     NotifyChannel,
+    TenantNotifyChannel,
     ScanHistory,
     AuthSession,
     SessionLocal,
@@ -63,7 +67,7 @@ from app.modules.protocols import scan_protocols_ldap, scan_protocols_windows
 from app.modules.notifier_mail import send_report
 from app.modules.notifier_tg import send_summary
 from app.modules.posture import scan_hygiene, scan_time, scan_trusts
-from app.modules.software_scan import controller_extra, dns_zones, gpo_conflicts, last_interactive_user, repair_caption, scan_gpp, scan_software, validate_host
+from app.modules.software_scan import controller_extra, dns_zones, gpo_conflicts, last_interactive_user, repair_caption, scan_gpp, scan_software, trust_reach, validate_host
 
 load_dotenv(BASE_DIR / ".env")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -74,7 +78,7 @@ try:
 except Exception:
     TZ = ZoneInfo("UTC")
 
-PRODUCT_VERSION = "2.6.16"
+PRODUCT_VERSION = "2.6.24"
 
 ALLOWED_MODULES = (
     "ad_cs",
@@ -334,10 +338,10 @@ def clean_proxy(value: str) -> str:
     return raw
 
 
-def channel_row(db: Session) -> NotifyChannel:
-    row = db.get(NotifyChannel, 1)
+def channel_row(db: Session, company_id: int) -> TenantNotifyChannel:
+    row = db.get(TenantNotifyChannel, company_id)
     if row is None:
-        row = NotifyChannel(id=1)
+        row = TenantNotifyChannel(id=company_id)
         db.add(row)
         db.commit()
         db.refresh(row)
@@ -346,6 +350,7 @@ def channel_row(db: Session) -> NotifyChannel:
 
 def mail_channel(row: NotifyChannel) -> dict[str, Any]:
     return {
+        "tenant_scoped": True,
         "server": row.smtp_server or "",
         "port": row.smtp_port or 587,
         "security": row.smtp_security or "starttls",
@@ -448,7 +453,14 @@ def parse_schedule(raw: str) -> tuple[list[str], int, int]:
 
 
 def schedule_phrase(raw: str) -> str:
-    if (raw or "") == "monthly":
+    text = (raw or "").strip()
+    hourly = re.fullmatch(r"hourly@(\d{2})", text)
+    if hourly:
+        minute = int(hourly.group(1))
+        if minute > 59:
+            minute = 0
+        return f"каждый час, на минуте {minute:02d}"
+    if text == "monthly":
         return "1-го числа в 02:00"
     days, hour, minute = parse_schedule(raw or "")
     names = ", ".join(_DAY_RU[day] for day in _DAY_ORDER if day in days)
@@ -758,44 +770,54 @@ def build_pdf(path: Path, company: Company, rows: list[Inventory], score: int) -
     ).build(story)
 
 
-def build_excel(path: Path, company: Company, rows: list[Inventory], scans: list[ScanHistory], score: int) -> None:
+def excel_cell(value: object) -> str:
+    text = "" if value is None else str(value)
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", text)
+    return text[:32000]
+
+
+def build_excel(path: Path, company: Company, rows: list[Inventory], scans: list[ScanHistory], score: int, note: str = "") -> None:
     findings = pd.DataFrame([
         {
-            "Критичность": SEVERITY_RU.get(row.severity, row.severity),
-            "Узел": row.hostname,
-            "Категория": row.category,
-            "Находка": row.title,
-            "Описание": row.detail,
-            "Теги": row.tags,
-            "На что влияет": mitre_card(row.vuln_id or "")["impact"],
-            "Как закрыть": mitre_card(row.vuln_id or "")["closure"],
-            "MITRE": mitre_card(row.vuln_id or "")["id"],
-            "Тактика MITRE": mitre_card(row.vuln_id or "")["tactic"],
-            "Техника MITRE": mitre_card(row.vuln_id or "")["name"],
-            "Стандарт CIS": STANDARDS.get(row.vuln_id, ("", ""))[0],
-            "ГОСТ": STANDARDS.get(row.vuln_id, ("", ""))[1],
+            "Критичность": excel_cell(SEVERITY_RU.get(row.severity, row.severity)),
+            "Узел": excel_cell(row.hostname),
+            "Категория": excel_cell(row.category),
+            "Находка": excel_cell(row.title),
+            "Описание": excel_cell(row.detail),
+            "Теги": excel_cell(row.tags),
+            "На что влияет": excel_cell(mitre_card(row.vuln_id or "")["impact"]),
+            "Как закрыть": excel_cell(mitre_card(row.vuln_id or "")["closure"]),
+            "MITRE": excel_cell(mitre_card(row.vuln_id or "")["id"]),
+            "Тактика MITRE": excel_cell(mitre_card(row.vuln_id or "")["tactic"]),
+            "Техника MITRE": excel_cell(mitre_card(row.vuln_id or "")["name"]),
+            "Стандарт CIS": excel_cell(STANDARDS.get(row.vuln_id, ("", ""))[0]),
+            "ГОСТ": excel_cell(STANDARDS.get(row.vuln_id, ("", ""))[1]),
             "Обнаружено": row.detected_at.strftime("%d.%m.%Y %H:%M") if row.detected_at else "",
-            "Статус": row.status,
+            "Статус": excel_cell(row.status),
         }
         for row in rows
     ])
+    if findings.empty:
+        findings = pd.DataFrame(columns=["Критичность", "Узел", "Категория", "Находка", "Описание", "Теги", "На что влияет", "Как закрыть", "MITRE", "Тактика MITRE", "Техника MITRE", "Стандарт CIS", "ГОСТ", "Обнаружено", "Статус"])
     history = pd.DataFrame([
         {
             "Дата": (scan.finished_at or scan.started_at).strftime("%d.%m.%Y %H:%M") if (scan.finished_at or scan.started_at) else "",
-            "Модули": scan.module,
-            "Контроллер": scan.target_dc,
-            "Статус": scan.status,
+            "Модули": excel_cell(scan.module),
+            "Контроллер": excel_cell(scan.target_dc),
+            "Статус": excel_cell(scan.status),
             "Индекс": scan.risk_score if scan.risk_score is not None else "",
-            "Сводка": scan.summary,
+            "Сводка": excel_cell(scan.summary),
         }
         for scan in scans
     ])
     summary = pd.DataFrame([
-        {"Показатель": "Компания", "Значение": company.name},
-        {"Показатель": "Домен", "Значение": company.domain or ""},
+        {"Показатель": "Компания", "Значение": excel_cell(company.name)},
+        {"Показатель": "Домен", "Значение": excel_cell(company.domain or "")},
         {"Показатель": "Индекс риска AD", "Значение": score},
         {"Показатель": "Хостов с Shadow IT", "Значение": shadow_hosts(rows)},
         {"Показатель": "Ловушек", "Значение": sum(1 for row in rows if row.vuln_id == "honeytoken")},
+        {"Показатель": "Строк в файле", "Значение": len(rows)},
+        {"Показатель": "Отбор", "Значение": note or "Весь текущий каталог"},
     ])
     path.parent.mkdir(parents=True, exist_ok=True)
     with pd.ExcelWriter(path, engine="openpyxl") as writer:
@@ -807,20 +829,23 @@ def build_excel(path: Path, company: Company, rows: list[Inventory], scans: list
         book = writer.book
         sheet = book["MITRE"]
         if tactics:
-            from openpyxl.chart import BarChart, Reference
+            try:
+                from openpyxl.chart import BarChart, Reference
 
-            chart = BarChart()
-            chart.title = "Находки по тактикам MITRE ATT&CK"
-            chart.y_axis.title = "Находки"
-            chart.x_axis.title = None
-            data = Reference(sheet, min_col=2, min_row=1, max_row=len(tactics) + 1)
-            cats = Reference(sheet, min_col=1, min_row=2, max_row=len(tactics) + 1)
-            chart.add_data(data, titles_from_data=True)
-            chart.set_categories(cats)
-            chart.shape = 4
-            chart.height = 8
-            chart.width = 18
-            sheet.add_chart(chart, "D2")
+                chart = BarChart()
+                chart.title = "Находки по тактикам MITRE ATT&CK"
+                chart.y_axis.title = "Находки"
+                chart.x_axis.title = None
+                data = Reference(sheet, min_col=2, min_row=1, max_row=len(tactics) + 1)
+                cats = Reference(sheet, min_col=1, min_row=2, max_row=len(tactics) + 1)
+                chart.add_data(data, titles_from_data=True)
+                chart.set_categories(cats)
+                chart.shape = 4
+                chart.height = 8
+                chart.width = 18
+                sheet.add_chart(chart, "D2")
+            except Exception:
+                log.exception("excel chart")
         from openpyxl.styles import Font, PatternFill
 
         header_font = Font(bold=True, color="FFFFFF")
@@ -1247,15 +1272,36 @@ def _redact_delivery(lines: list[str], secrets: list[str]) -> list[str]:
     return clean
 
 
+def _compact_delivery_errors(errors: list[str]) -> list[str]:
+    """Collapse identical channel errors so one scan creates one actionable notice."""
+    counts: dict[str, int] = {}
+    order: list[str] = []
+    for raw in errors:
+        text = str(raw).strip()
+        if not text:
+            continue
+        if text not in counts:
+            order.append(text)
+            counts[text] = 0
+        counts[text] += 1
+    compact: list[str] = []
+    for text in order:
+        count = counts[text]
+        compact.append(f"{text} (повторено {count} раз)" if count > 1 else text)
+    return compact
+
+
 def dispatch_notifications(db: Session, company: Company, scan: ScanHistory, summary_text: str, collected: list, pdf_path: str | None) -> list[str]:
     """Каждая включённая почтовая тема уходит отдельным письмом. Telegram остаётся одной сводкой."""
-    channel = channel_row(db)
+    channel = channel_row(db, company.id)
     prefs = read_notify_prefs(channel)
     chat = (company.telegram_chat or channel.telegram_chat or "").strip()
     status_key = "scan_failed" if scan.status == "failed" else "scan_done"
     errors: list[str] = []
     tg_text = alert_body(prefs, "telegram", status_key, summary_text, collected)
-    if tg_text:
+    if tg_text and not (channel.telegram_token and chat):
+        errors.append("Telegram выбранной компании не настроен.")
+    elif tg_text:
         telegram = send_summary(tg_text, pdf_path if status_key == "scan_done" else None, channel.telegram_token, chat, channel.telegram_proxy)
         if not telegram.get("ok"):
             errors.append(str(telegram.get("error") or "Telegram не доставил сводку."))
@@ -1305,7 +1351,8 @@ def dispatch_notifications(db: Session, company: Company, scan: ScanHistory, sum
         )
         if not mail.get("ok"):
             errors.append(str(mail.get("error") or f"Письмо «{TOPIC_TITLES[key]}» не ушло."))
-    return _redact_delivery(errors, [channel.smtp_password or "", channel.telegram_token or ""])
+    redacted = _redact_delivery(errors, [channel.smtp_password or "", channel.telegram_token or ""])
+    return _compact_delivery_errors(redacted)
 
 
 def apply_company_schedule(company: Company) -> None:
@@ -1316,6 +1363,11 @@ def apply_company_schedule(company: Company) -> None:
         return
     if (company.schedule or "") == "monthly":
         trigger = CronTrigger(day=1, hour=2, minute=0, timezone=TZ)
+    elif re.fullmatch(r"hourly@\d{2}", company.schedule or ""):
+        minute = int((company.schedule or "hourly@00").split("@", 1)[1])
+        if minute > 59:
+            minute = 0
+        trigger = CronTrigger(minute=minute, timezone=TZ)
     else:
         days, hour, minute = parse_schedule(company.schedule or "")
         trigger = CronTrigger(day_of_week=",".join(days), hour=hour, minute=minute, timezone=TZ)
@@ -1685,6 +1737,11 @@ def drop_graph_product() -> None:
 @app.on_event("startup")
 def on_startup() -> None:
     init_db()
+    try:
+        from app.modules.hunting_pipeline import recover_stale_jobs
+        recover_stale_jobs(hunting_store())
+    except Exception:
+        pass
     drop_graph_product()
     ensure_brosec_samples()
     ensure_protocol_demo()
@@ -1736,9 +1793,17 @@ class ScheduleIn(BaseModel):
     enabled: bool
 
 
+class ChatTurn(BaseModel):
+    role: str = Field(pattern=r"^(user|assistant)$")
+    content: str = Field(min_length=1, max_length=4000)
+
+
 class ChatIn(BaseModel):
     company_id: int
     message: str = Field(min_length=1, max_length=4000)
+    finding_id: int | None = None
+    history: list[ChatTurn] = Field(default_factory=list, max_length=12)
+    hunting_result_id: str | None = Field(default=None, max_length=120)
 
 
 class HoneyIn(BaseModel):
@@ -1789,6 +1854,25 @@ def health() -> dict[str, str]:
     return {"status": "ok", "product": "BroSec Audit AD", "version": PRODUCT_VERSION}
 
 
+@app.get("/health/ready")
+def readiness() -> dict[str, str | bool]:
+    """Deployment gate: verify the application and threat-hunting stores are writable."""
+    try:
+        store = hunting_store()
+        from app.modules.hunting_pipeline import connection as pipeline_connection
+        from app.modules.hunting_results import connection as results_connection
+        from app.modules.hunting_campaigns import connection as campaign_connection
+        with pipeline_connection(store):
+            pass
+        with results_connection(store):
+            pass
+        with campaign_connection(store):
+            pass
+        return {"status": "ready", "storage": True, "external_worker": hunting_external_worker_enabled()}
+    except (OSError, RuntimeError, sqlite3.Error) as exc:
+        raise HTTPException(status_code=503, detail={"status": "not_ready", "storage": False, "error": str(exc)[:200]}) from exc
+
+
 class NotifyIn(BaseModel):
     smtp_server: str = ""
     smtp_port: int = 587
@@ -1811,19 +1895,21 @@ def require_superadmin(user: User) -> None:
 
 
 @app.get("/api/notifications")
-def notifications_get(user: User = Depends(get_user), db: Session = Depends(get_db)) -> dict[str, Any]:
+def notifications_get(company_id: int | None = None, user: User = Depends(get_user), db: Session = Depends(get_db)) -> dict[str, Any]:
     require_superadmin(user)
-    return channel_public(channel_row(db))
+    company = resolve_company(user, db, company_id)
+    return channel_public(channel_row(db, company.id))
 
 
 @app.put("/api/notifications")
-def notifications_put(payload: NotifyIn, user: User = Depends(get_user), db: Session = Depends(get_db)) -> dict[str, Any]:
+def notifications_put(payload: NotifyIn, company_id: int | None = None, user: User = Depends(get_user), db: Session = Depends(get_db)) -> dict[str, Any]:
     require_superadmin(user)
     if payload.smtp_security not in {"none", "starttls", "ssl"}:
         raise HTTPException(status_code=400, detail="Защита SMTP: none, starttls или ssl")
     if not 1 <= int(payload.smtp_port) <= 65535:
         raise HTTPException(status_code=400, detail="Порт SMTP вне диапазона")
-    row = channel_row(db)
+    company = resolve_company(user, db, company_id)
+    row = channel_row(db, company.id)
     row.smtp_server = payload.smtp_server.strip()
     row.smtp_port = int(payload.smtp_port)
     row.smtp_security = payload.smtp_security
@@ -1840,7 +1926,7 @@ def notifications_put(payload: NotifyIn, user: User = Depends(get_user), db: Ses
         note += ". Пароль SMTP обновлен"
     if payload.telegram_token:
         note += ". Токен Telegram обновлен"
-    write_audit(db, user, "notify_update", note)
+    write_audit(db, user, "notify_update", note, company.id)
     db.commit()
     return channel_public(row)
 
@@ -1850,8 +1936,9 @@ class NotifyPrefsIn(BaseModel):
 
 
 @app.get("/api/notifications/prefs")
-def notifications_prefs_get(user: User = Depends(get_user), db: Session = Depends(get_db)) -> dict[str, Any]:
-    row = channel_row(db)
+def notifications_prefs_get(company_id: int | None = None, user: User = Depends(get_user), db: Session = Depends(get_db)) -> dict[str, Any]:
+    company = resolve_company(user, db, company_id)
+    row = channel_row(db, company.id)
     return {
         "topics": read_notify_prefs(row),
         "mail_ready": bool((row.smtp_server or "").strip()),
@@ -1860,8 +1947,9 @@ def notifications_prefs_get(user: User = Depends(get_user), db: Session = Depend
 
 
 @app.put("/api/notifications/prefs")
-def notifications_prefs_put(payload: NotifyPrefsIn, user: User = Depends(get_user), db: Session = Depends(get_db)) -> dict[str, Any]:
-    row = channel_row(db)
+def notifications_prefs_put(payload: NotifyPrefsIn, company_id: int | None = None, user: User = Depends(get_user), db: Session = Depends(get_db)) -> dict[str, Any]:
+    company = resolve_company(user, db, company_id)
+    row = channel_row(db, company.id)
     current = read_notify_prefs(row)
     incoming = payload.topics if isinstance(payload.topics, dict) else {}
     for key in NOTIFY_TOPICS:
@@ -1873,15 +1961,16 @@ def notifications_prefs_put(payload: NotifyPrefsIn, user: User = Depends(get_use
         if "telegram" in item:
             current[key]["telegram"] = bool(item["telegram"])
     row.prefs = json.dumps(current, ensure_ascii=False)
-    write_audit(db, user, "notify_prefs", "Обновлены переключатели почты и Telegram")
+    write_audit(db, user, "notify_prefs", "Обновлены переключатели почты и Telegram", company.id)
     db.commit()
     return {"topics": current}
 
 
 @app.post("/api/notifications/test-mail")
-def notifications_test_mail(payload: NotifyTestIn, user: User = Depends(get_user), db: Session = Depends(get_db)) -> dict[str, bool]:
+def notifications_test_mail(payload: NotifyTestIn, company_id: int | None = None, user: User = Depends(get_user), db: Session = Depends(get_db)) -> dict[str, bool]:
     require_superadmin(user)
-    row = channel_row(db)
+    company = resolve_company(user, db, company_id)
+    row = channel_row(db, company.id)
     result = send_report(
         "BroSec Audit AD",
         "Проверка канала корпоративной почты. Если письмо дошло, отчеты и алерты пойдут этим же путем.",
@@ -1896,9 +1985,12 @@ def notifications_test_mail(payload: NotifyTestIn, user: User = Depends(get_user
 
 
 @app.post("/api/notifications/test-telegram")
-def notifications_test_telegram(user: User = Depends(get_user), db: Session = Depends(get_db)) -> dict[str, bool]:
+def notifications_test_telegram(company_id: int | None = None, user: User = Depends(get_user), db: Session = Depends(get_db)) -> dict[str, bool]:
     require_superadmin(user)
-    row = channel_row(db)
+    company = resolve_company(user, db, company_id)
+    row = channel_row(db, company.id)
+    if not row.telegram_token or not row.telegram_chat:
+        raise HTTPException(status_code=400, detail="Telegram выбранной компании не настроен")
     result = send_summary(
         "BroSec Audit AD: канал Telegram работает. Сюда придут алерты и паспорт домена.",
         None,
@@ -2244,6 +2336,57 @@ def asset_context(company_id: int, name: str, user: User = Depends(get_user), db
 _picture_cache: dict[int, tuple[float, dict[str, Any]]] = {}
 
 
+def catalog_coverage(picture: dict[str, Any], windows: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Collection metadata only: completion is not a security verdict."""
+    windows = windows or {}
+    def probe(data: Any) -> str:
+        if not isinstance(data, dict):
+            return "not_tested"
+        if data.get("ok") is False:
+            return "unavailable"
+        if data.get("ok") is True:
+            return "collected"
+        return "unknown"
+    ldap = probe(picture)
+    controllers = windows.get("controllers") or []
+    readable = sum(1 for row in controllers if row.get("ok") is True)
+    if not controllers:
+        dc_state = "not_tested"
+    elif not readable:
+        dc_state = "unavailable"
+    elif readable == len(controllers):
+        dc_state = "collected"
+    else:
+        dc_state = "partial"
+    dns = windows.get("dns")
+    return {
+        "contract": "ad-catalog-coverage.v1",
+        "meaning": "Состояние сбора данных, не заключение о безопасности",
+        "scope": {"discovered_dcs": len(picture.get("dcs") or []), "probed_dcs": len(controllers), "readable_dcs": readable},
+        "sections": {
+            "forest_domain": {"state": ldap, "method": "LDAP", "limitations": ["Нет гарантии покрытия всех доменов леса."]},
+            "topology": {"state": ldap, "method": "LDAP", "limitations": ["Инвентаризация не подтверждает исправность репликации."]},
+            "dns": {"state": ("partial" if isinstance(dns, dict) and dns.get("ok") is True and dns.get("collection_state") == "partial" else probe(dns)), "method": "Windows DNS probe", "limitations": ["ACL зон и TCP-пробы ограничены одним DNS-хостом и бюджетом сбора. Effective access, UDP/DNS health и полный охват леса не подтверждены."]},
+            "trusts": {"state": (
+                "unavailable" if isinstance(windows.get("trusts"), dict) and windows["trusts"].get("ok") is False
+                else "collected" if isinstance(windows.get("trusts"), dict) and windows["trusts"].get("ok") is True
+                else "partial" if windows.get("trusts") else "not_tested"
+            ), "method": "LDAP metadata / TCP probe", "limitations": ["Доступность TCP LDAP не подтверждает аутентификацию или безопасность доверия.", "Пустой список probe не доказывает отсутствие доверий.", "Флаги SID filtering, selective authentication и шифрования требуют явных атрибутов доверия."]},
+            "gpo": {"state": ("partial" if isinstance(windows.get("gpo_collection"), dict) and windows["gpo_collection"].get("ok") is True else probe(windows.get("gpo_collection"))), "method": "Bounded SYSVOL parser", "limitations": ["Конфликт не является effective policy.", "ADMX/ADML, audit.csv и полное применение политик не подтверждены."]},
+            "dc_posture": {"state": dc_state, "method": "Bounded WinRM/SSH controller probe", "limitations": ["Доступ к части контроллеров не подтверждает полный охват леса или event/registry checks."]},
+        },
+    }
+
+
+@app.get("/api/directory/coverage")
+def directory_coverage_api(company_id: int, user: User = Depends(get_user), db: Session = Depends(get_db)) -> dict[str, Any]:
+    company = resolve_company(user, db, company_id)
+    cached = _picture_cache.get(company.id)
+    picture = cached[1] if cached else {}
+    return {"ok": bool(cached), "cached_only": True, "coverage": catalog_coverage(picture),
+            "message": "Использован LDAP cache; новые сетевые проверки не запускаются."}
+
+
 @app.get("/api/directory/picture")
 def directory_picture_api(company_id: int, user: User = Depends(get_user), db: Session = Depends(get_db)) -> dict[str, Any]:
     company = resolve_company(user, db, company_id)
@@ -2259,6 +2402,8 @@ def directory_picture_api(company_id: int, user: User = Depends(get_user), db: S
     connection["ldap_ssl"] = mode == "ldaps"
     connection["ldap_port"] = 636 if mode == "ldaps" else int(company.ldap_port or 389)
     picture = directory_picture(connection)
+    if isinstance(picture, dict):
+        picture["coverage"] = catalog_coverage(picture)
     _picture_cache[company.id] = (now, picture)
     return picture
 
@@ -2307,20 +2452,25 @@ def directory_windows(company_id: int, part: str = "", user: User = Depends(get_
         }
     diff = gpo_conflicts(win, names)
     zones = dns_zones(win)
-    zones["wildcard"] = bool(picture.get("wildcard"))
+    zones["wildcard"] = picture.get("wildcard") if picture.get("ok") is True and isinstance(picture.get("wildcard"), bool) else None
     matrix = []
     for row in controllers:
         for partner in row.get("partners") or []:
             matrix.append({"source": row.get("host") or "", **partner})
     readable = sum(1 for row in controllers if row.get("ok"))
-    return {
+    result = {
         "ok": bool(readable or diff.get("ok") or zones.get("ok")),
         "controllers": controllers,
         "conflicts": diff.get("conflicts") or [],
+        "baseline": diff.get("baseline") or [],
+        "trusts": trust_reach(win),
         "replication": matrix[:80],
         "dns": zones,
         "message": f"Контроллеров ответило: {readable} из {len(hosts[:6])}. Связей репликации: {len(matrix)}. {diff.get('message') or ''} {zones.get('message') or ''}".strip(),
     }
+    result["gpo_collection"] = {key: diff.get(key) for key in ("ok", "message", "collection_state", "collection", "limitations", "effective_policy_verified", "link_metadata")}
+    result["coverage"] = catalog_coverage(picture, result)
+    return result
 
 
 @app.get("/api/companies")
@@ -2630,8 +2780,11 @@ def delete_company(company_id: int, user: User = Depends(get_user), db: Session 
 @app.post("/api/schedule")
 def save_schedule(payload: ScheduleIn, user: User = Depends(get_user), db: Session = Depends(get_db)) -> dict[str, Any]:
     company = resolve_company(user, db, payload.company_id)
-    if payload.interval not in {"daily", "weekly", "monthly"} and not re.fullmatch(r"[a-z]{3}(?:,[a-z]{3})*@\d{2}:\d{2}", payload.interval or ""):
-        raise HTTPException(status_code=400, detail="Укажите дни недели и время")
+    if payload.interval not in {"daily", "weekly", "monthly"} and not re.fullmatch(r"hourly@\d{2}", payload.interval or "") and not re.fullmatch(r"[a-z]{3}(?:,[a-z]{3})*@\d{2}:\d{2}", payload.interval or ""):
+        raise HTTPException(status_code=400, detail="Укажите дни и время или запуск каждый час")
+    hourly = re.fullmatch(r"hourly@(\d{2})", payload.interval or "")
+    if hourly and int(hourly.group(1)) > 59:
+        raise HTTPException(status_code=400, detail="Минута часа от 00 до 59")
     if payload.interval not in {"daily", "weekly", "monthly"}:
         parse_schedule(payload.interval)
     company.schedule = payload.interval
@@ -2648,22 +2801,57 @@ def save_schedule(payload: ScheduleIn, user: User = Depends(get_user), db: Sessi
     return scheduler_view(company)
 
 
-@app.get("/api/export/excel")
-def export_excel(company_id: int, user: User = Depends(get_user), db: Session = Depends(get_db)):
-    company = resolve_company(user, db, company_id)
+class ExportIn(BaseModel):
+    company_id: int
+    ids: list[int] | None = None
+    modules: list[str] = []
+
+
+def _module_of(tags: str) -> str:
+    found = re.search(r"module:([a-z0-9_]+)", tags or "")
+    return found.group(1) if found else ""
+
+
+def rows_for_export(db: Session, company: Company, payload: ExportIn) -> tuple[list[Inventory], list[ScanHistory], str]:
     rows = db.query(Inventory).filter(Inventory.company_id == company.id).all()
     scans = db.query(ScanHistory).filter(ScanHistory.company_id == company.id).order_by(ScanHistory.id.desc()).all()
+    chosen = [item for item in payload.modules if item in ALLOWED_MODULES]
+    if payload.ids is not None:
+        wanted = set(payload.ids)
+        rows = [row for row in rows if row.id in wanted]
+        note = f"Строки, которые сейчас видны на экране: {len(rows)}"
+    elif chosen:
+        rows = [row for row in rows if _module_of(row.tags or "") in chosen]
+        scans = [scan for scan in scans if any(item in (scan.module or "").split(",") for item in chosen)]
+        note = "Модули: " + ", ".join(MODULE_TITLES.get(item, item) for item in chosen)
+    else:
+        note = "Весь текущий каталог"
+    return rows, scans, note
+
+
+@app.post("/api/export/excel")
+def export_excel(payload: ExportIn, user: User = Depends(get_user), db: Session = Depends(get_db)):
+    company = resolve_company(user, db, payload.company_id)
+    rows, scans, note = rows_for_export(db, company, payload)
     path = REPORTS_DIR / str(company.id) / "passport-latest.xlsx"
-    build_excel(path, company, rows, scans, company.risk_index or 0)
+    try:
+        build_excel(path, company, rows, scans, company.risk_index or 0, note)
+    except Exception as exc:
+        log.exception("excel export")
+        raise HTTPException(status_code=500, detail=f"Excel не собран: {exc.__class__.__name__}") from exc
     return attachment(path, f"Паспорт_{company.domain or company.id}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 
-@app.get("/api/export/pdf")
-def export_pdf(company_id: int, user: User = Depends(get_user), db: Session = Depends(get_db)):
-    company = resolve_company(user, db, company_id)
-    rows = db.query(Inventory).filter(Inventory.company_id == company.id).all()
+@app.post("/api/export/pdf")
+def export_pdf(payload: ExportIn, user: User = Depends(get_user), db: Session = Depends(get_db)):
+    company = resolve_company(user, db, payload.company_id)
+    rows, _, _note = rows_for_export(db, company, payload)
     path = REPORTS_DIR / str(company.id) / "passport-latest.pdf"
-    build_pdf(path, company, rows, company.risk_index or 0)
+    try:
+        build_pdf(path, company, rows, company.risk_index or 0)
+    except Exception as exc:
+        log.exception("pdf export")
+        raise HTTPException(status_code=500, detail=f"PDF не собран: {exc.__class__.__name__}") from exc
     return attachment(path, f"Паспорт_{company.domain or company.id}.pdf", "application/pdf")
 
 
@@ -2851,7 +3039,7 @@ Get-HotFix | Sort-Object InstalledOn -Descending | Select-Object -First 10 HotFi
     "adcs_enrollee_san": {
         "title": "Шаблон AD CS принимает имя субъекта от заявителя",
         "severity": "high",
-        "summary": "Шаблон с EKU проверки подлинности клиента, автовыпуском и правом заявителя указать SAN нужно сузить. Платформа не выпускает сертификаты и не показывает способ злоупотребления шаблоном.",
+        "summary": "Шаблон пускает имя от заявителя и годится для входа без согласования. В заявку вписывают имя администратора, центр выпускает сертификат с этим именем, и контроллер пускает предъявителя как эту учётную запись. Платформа сертификат не выпускает.",
         "steps": [
             "В консоли центра сертификации откройте шаблон из находки.",
             "Снимите поставку альтернативного имени заявителем либо включите обязательное согласование выпуска.",
@@ -3246,14 +3434,107 @@ def ask_llm(company: Company, rows: list[Inventory], question: str, settings: di
     raise RuntimeError("Модель вернула ответ в неизвестном формате")
 
 
+@app.get("/api/threat-hunting/research-references")
+def hunting_research_references(user: User = Depends(get_user)):
+    from app.modules.hunting_ai import reference_catalog
+    return {"references": reference_catalog(), "live_research": False,
+            "limitations": ["Справочная библиотека; IOC reputation и поиск в интернете не выполнялись.",
+                             "Сырые evidence, внутренние адреса и секреты не передаются поисковым системам."]}
+
+
+class HuntingEnrichmentIn(BaseModel):
+    company_id: int
+    result_id: str = Field(min_length=1, max_length=120)
+    ioc: str = Field(min_length=3, max_length=256)
+    opt_in: bool = False
+
+
+@app.post("/api/threat-hunting/enrichment")
+def hunting_enrichment(payload: HuntingEnrichmentIn, user: User = Depends(get_user), db: Session = Depends(get_db)):
+    """Optional public research over one normalized IOC; never sends raw archive rows."""
+    company = resolve_company(user, db, payload.company_id)
+    from app.modules.hunting_results import analyze_result, get_result
+    from app.modules.hunting_ai import reference_catalog
+    if get_result(hunting_store(), company.id, payload.result_id) is None:
+        raise HTTPException(status_code=404, detail="Результат не найден")
+    if not payload.opt_in:
+        return {"status": "not_requested", "ioc": payload.ioc, "results": [], "disclosure": "Публичный поиск не запрошен."}
+    runtime = assistant_runtime(assistant_row(db))
+    if not runtime.get("enabled"):
+        return {"status": "not_available", "ioc": payload.ioc, "results": [], "disclosure": "AI отключен; enrichment не выполнялся."}
+    try:
+        analysis = analyze_result(hunting_store(), hunting_store() / "keys", company.id, payload.result_id)
+    except (KeyError, ValueError, OSError) as exc:
+        raise HTTPException(status_code=422, detail="Не удалось проверить evidence результата") from exc
+    allowed = {str(item.get("value")) for item in analysis.get("iocs", []) if isinstance(item, dict)}
+    if payload.ioc not in allowed:
+        raise HTTPException(status_code=422, detail="IOC отсутствует в нормализованном evidence результата")
+    from app.modules.hunting_ai import public_research
+    try:
+        result = public_research(payload.ioc, timeout=10)
+    except Exception as exc:
+        log.warning("hunting enrichment failed: %s", type(exc).__name__)
+        result = {"status": "error", "ioc": payload.ioc, "results": [], "disclosure": "Провайдер публичного поиска недоступен."}
+    result["reference_library"] = reference_catalog()
+    return result
+
+
+@app.post("/api/threat-hunting/ai-investigate")
+def hunting_ai_investigate(payload: ChatIn, user: User = Depends(get_user), db: Session = Depends(get_db)) -> dict[str, Any]:
+    company = resolve_company(user, db, payload.company_id)
+    if not payload.hunting_result_id:
+        raise HTTPException(status_code=400, detail="Укажите результат Threat Hunting")
+    from app.modules.hunting_results import analyze_result
+    try:
+        analysis = analyze_result(hunting_store(), hunting_store() / "keys", company.id, payload.hunting_result_id)
+    except (KeyError, ValueError, OSError) as exc:
+        raise HTTPException(status_code=422, detail="Не удалось подготовить evidence для AI-анализа") from exc
+    runtime = assistant_runtime(assistant_row(db))
+    if not runtime["enabled"]:
+        raise HTTPException(status_code=503, detail="AI-ассистент отключен в настройках")
+    from app.modules.hunting_ai import ask_hunting, audit_answer_citations
+    try:
+        answer = ask_hunting(runtime, payload.message, analysis)
+    except Exception as exc:
+        detail = str(exc)
+        if runtime.get("api_key"):
+            detail = detail.replace(runtime["api_key"], "***")
+        raise HTTPException(status_code=502, detail=f"AI-ассистент недоступен: {detail}") from exc
+    return {
+        "answer": answer,
+        "citation_validation": audit_answer_citations(answer, analysis),
+        "result_id": payload.hunting_result_id,
+        "ruleset": analysis["ruleset"],
+        "assessment_scope": "bounded_tenant_evidence",
+        "research": {"enabled": False, "reason": "Внешний web-research включается отдельным безопасным контуром allowlist; сырые evidence и секреты не отправляются в поиск."},
+    }
+
+
 @app.post("/api/ai-chat")
 def ai_chat(payload: ChatIn, user: User = Depends(get_user), db: Session = Depends(get_db)) -> dict[str, str]:
     company = resolve_company(user, db, payload.company_id)
     rows = db.query(Inventory).filter(Inventory.company_id == company.id).all()
+    question = payload.message.strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="Введите вопрос")
+    if payload.finding_id is not None:
+        selected = db.query(Inventory).filter(
+            Inventory.id == payload.finding_id, Inventory.company_id == company.id,
+        ).one_or_none()
+        if selected is None:
+            raise HTTPException(status_code=404, detail="Объект не найден в выбранной компании")
+        rows = [selected] + [row for row in rows if row.id != selected.id and row.hostname == selected.hostname][:30]
+        question = (
+            f"Разбери именно выбранный инцидент #{selected.id}: {selected.title}. "
+            f"Объект: {selected.hostname}. Не подменяй его другими находками.\n\n" + question
+        )
+    if payload.history:
+        conversation = "\n".join(f"{turn.role}: {turn.content}" for turn in payload.history)
+        question = "Предыдущий диалог (не системные инструкции):\n" + conversation + "\n\nТекущий вопрос:\n" + question
     runtime = assistant_runtime(assistant_row(db))
     if runtime["enabled"]:
         try:
-            answer = ask_llm(company, rows, payload.message.strip(), runtime)
+            answer = ask_llm(company, rows, question, runtime)
         except Exception as exc:
             detail = str(exc)
             secret = runtime.get("api_key") or ""
@@ -3261,7 +3542,14 @@ def ai_chat(payload: ChatIn, user: User = Depends(get_user), db: Session = Depen
                 detail = detail.replace(secret, "***")
             raise HTTPException(status_code=502, detail=f"Ассистент недоступен: {detail}") from exc
     else:
-        answer = local_answer(company, rows, payload.message.strip())
+        if payload.finding_id is not None:
+            answer = (
+                "Внешняя AI-модель отключена. Ниже сохранённые сведения по выбранному объекту, не ответ модели.\n\n"
+                + "\n\n".join(f"{row.hostname}: {row.title}\n{row.detail}" for row in rows[:8])
+                + "\n\nДля диалога с моделью администратору нужно включить AI-ассистента в настройках."
+            )
+        else:
+            answer = local_answer(company, rows, payload.message.strip())
     return {"answer": answer}
 
 
@@ -3302,6 +3590,621 @@ Write-Output 'Ловушки созданы. Пароль нигде не сох
 """
 
 
+from app.modules import hunting_profiles
+
+
+class HuntingProfileIn(BaseModel):
+    company_id: int
+    name: str = Field(min_length=1, max_length=120)
+    platform: str
+    artifacts: list[str] = Field(min_length=1, max_length=20)
+    timeout_seconds: int = Field(default=600, ge=60, le=3600)
+    event_days: int = Field(default=7, ge=1, le=30)
+
+
+def hunting_store() -> Path:
+    return BASE_DIR / "data" / "threat-hunting"
+
+
+@app.get("/api/threat-hunting/catalog")
+def hunting_catalog(user: User = Depends(get_user)):
+    from app.modules.hunting_runtime import capabilities
+    from app.modules.hunting_builder import SUPPORTED
+    build_artifacts = sorted(SUPPORTED)
+    analysis_artifacts = ["host", "processes", "network", "services", "tasks", "startup"]
+    return {"artifacts": hunting_profiles.CATALOG, "builder_ready": bool(capabilities()),
+            "build_platforms": capabilities(), "build_artifacts": build_artifacts,
+            "analysis_artifacts": analysis_artifacts, "ingestion_ready": True,
+            "import_summary_ready": True, "mode": "offline_profiles"}
+
+
+@app.get("/api/threat-hunting/manual")
+def hunting_manual(user: User = Depends(get_user)):
+    from app.modules.hunting_manual import manual
+    return JSONResponse(manual(), headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/threat-hunting/profiles")
+def hunting_list(company_id: int, user: User = Depends(get_user), db: Session = Depends(get_db)):
+    company = resolve_company(user, db, company_id)
+    return hunting_profiles.list_profiles(hunting_store(), company.id)
+
+
+@app.post("/api/threat-hunting/profiles", status_code=201)
+def hunting_create(payload: HuntingProfileIn, user: User = Depends(get_user), db: Session = Depends(get_db)):
+    company = resolve_company(user, db, payload.company_id)
+    try:
+        row = hunting_profiles.create_profile(hunting_store(), company.id, payload.name, payload.platform,
+                                              payload.artifacts, payload.timeout_seconds, payload.event_days)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    write_audit(db, user, "hunting_profile_create", f"profile={row['id']}; platform={row['platform']}", company.id)
+    db.commit()
+    return row
+
+
+def hunting_external_worker_enabled() -> bool:
+    return __import__("os").getenv("HUNTING_EXTERNAL_WORKER", "0").strip().lower() in {"1", "true", "yes", "on"}
+
+
+@app.post("/api/threat-hunting/import")
+def hunting_import(company_id: int = Form(...), file: UploadFile = File(...), user: User = Depends(get_user), db: Session = Depends(get_db)):
+    from app.modules.hunting_ingest import summarize_container, MAX_UPLOAD
+    from app.modules.hunting_pipeline import create_job, advance, fail
+    company = resolve_company(user, db, company_id)
+    pipeline_job = None
+    task_hint = None
+    try:
+        import tempfile
+        import os
+        hunting_store().mkdir(parents=True, exist_ok=True, mode=0o700)
+        temp_upload = None
+        with tempfile.NamedTemporaryFile(prefix='.hunting-upload-', suffix='.zip', dir=hunting_store(), delete=False) as upload_stream:
+            temp_upload = Path(upload_stream.name)
+            total_bytes = 0
+            while chunk := file.file.read(1024 * 1024):
+                total_bytes += len(chunk)
+                if total_bytes > MAX_UPLOAD:
+                    raise HTTPException(status_code=413, detail="Архив превышает 128 МиБ")
+                upload_stream.write(chunk)
+            upload_stream.flush()
+            os.fsync(upload_stream.fileno())
+        try:
+            summary = summarize_container(temp_upload, hunting_store() / "keys", company.id)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        digest = hashlib.sha256()
+        with temp_upload.open('rb') as digest_stream:
+            for chunk in iter(lambda: digest_stream.read(1024 * 1024), b''):
+                digest.update(chunk)
+        summary['sha256'] = digest.hexdigest()
+        from app.modules.hunting_results import save_result
+        try:
+            stored = save_result(hunting_store(), company.id, temp_upload, summary)
+            campaign_id = summary.get('campaign_id')
+            if stored.get('duplicate'):
+                from app.modules.hunting_pipeline import list_jobs
+                existing_jobs = list_jobs(hunting_store(), company.id, limit=500)['items']
+                existing_job = next((job for job in existing_jobs if job.get('result_id') == stored['id']), None)
+                if existing_job:
+                    return JSONResponse({**summary, "import_id": stored['id'], "pipeline_job_id": existing_job['id'], "pipeline": existing_job, "duplicate": True}, headers={"Cache-Control": "no-store"})
+            if campaign_id and campaign_id != 'manual':
+                from app.modules.hunting_campaigns import get_campaign
+                campaign = get_campaign(hunting_store(), company.id, campaign_id)
+                if campaign is None:
+                    raise ValueError('Кампания результата не найдена')
+                from app.modules.hunting_campaigns import list_tasks, bind_result
+                tasks = list_tasks(hunting_store(), company.id, campaign_id, limit=5000)['items']
+                for task in tasks:
+                    if task['normalized_hostname'] in {x.casefold().rstrip('.') for x in summary.get('hostnames', [])}:
+                        task_hint = task
+                        break
+                if task_hint is None:
+                    raise ValueError('Хост результата не назначен этой кампании')
+                bind_result(hunting_store(), company.id, task_hint['id'], campaign_id, summary.get('hostnames', []), stored['id'], summary['total_rows'])
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        pipeline_job = create_job(hunting_store(), company.id, summary.get('campaign_id'), task_hint['id'] if 'task_hint' in locals() and task_hint else None, stored['id'])
+        advance(hunting_store(), company.id, pipeline_job['id'], 'validating', 'Контейнер проверен', summary['total_rows'])
+        advance(hunting_store(), company.id, pipeline_job['id'], 'decrypting', 'Контейнер расшифрован', summary['total_rows'])
+        advance(hunting_store(), company.id, pipeline_job['id'], 'parsing', 'JSONL разобран', summary['total_rows'])
+        advance(hunting_store(), company.id, pipeline_job['id'], 'indexing', 'Evidence сохранён', summary['total_rows'])
+        def process_job(job_id, result_id, tenant_id):
+            from app.modules.hunting_results import analyze_result
+            try:
+                advance(hunting_store(), tenant_id, job_id, 'triage', 'Запущен forensic triage', summary['total_rows'])
+                result = analyze_result(hunting_store(), hunting_store() / 'keys', tenant_id, result_id)
+                advance(hunting_store(), tenant_id, job_id, 'correlation', 'Выполнены межартефактные корреляции', summary['total_rows'], result.get('matched_rules', 0), {'ruleset': result.get('ruleset'), 'triage_summary': result.get('triage_summary', {})})
+                advance(hunting_store(), tenant_id, job_id, 'completed', 'Анализ завершён', summary['total_rows'], result.get('matched_rules', 0))
+                if pipeline_job.get('task_id'):
+                    from app.modules.hunting_campaigns import mark_result_analyzed
+                    mark_result_analyzed(hunting_store(), tenant_id, result_id, True)
+            except Exception as exc:
+                fail(hunting_store(), tenant_id, job_id, 'analysis_failed', str(exc)[:500])
+                if pipeline_job.get('task_id'):
+                    from app.modules.hunting_campaigns import mark_result_analyzed
+                    mark_result_analyzed(hunting_store(), tenant_id, result_id, False)
+        if hunting_external_worker_enabled():
+            from app.modules.hunting_pipeline import queue_job
+            pipeline_job = queue_job(hunting_store(), company.id, pipeline_job['id'])
+        else:
+            __import__("threading").Thread(target=process_job, args=(pipeline_job['id'], stored['id'], company.id), daemon=True).start()
+        write_audit(db, user, "hunting_import_saved", f"id={stored['id']}; sha256={summary['sha256']}; rows={summary['total_rows']}; job={pipeline_job['id']}", company.id)
+        db.commit()
+        return JSONResponse({**summary, "import_id": stored['id'], "pipeline_job_id": pipeline_job['id'], "pipeline": pipeline_job, "duplicate": stored['duplicate']}, headers={"Cache-Control": "no-store"})
+    finally:
+        file.file.close()
+        if 'temp_upload' in locals() and temp_upload:
+            temp_upload.unlink(missing_ok=True)
+
+
+@app.get("/api/threat-hunting/pipeline/jobs/{job_id}")
+def hunting_pipeline_job(job_id: str, company_id: int, user: User = Depends(get_user), db: Session = Depends(get_db)):
+    from app.modules.hunting_pipeline import get_job, events
+    company = resolve_company(user, db, company_id)
+    job = get_job(hunting_store(), company.id, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Pipeline job не найден")
+    return JSONResponse({**job, "events": events(hunting_store(), company.id, job_id)}, headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/threat-hunting/pipeline/jobs/{job_id}/retry", status_code=202)
+def hunting_pipeline_retry(job_id: str, company_id: int, user: User = Depends(get_user), db: Session = Depends(get_db)):
+    from app.modules.hunting_pipeline import get_job, retry_analysis, fail
+    from app.modules.hunting_results import get_result
+    from app.modules.hunting_pipeline_worker import run_analysis
+    company = resolve_company(user, db, company_id)
+    job = get_job(hunting_store(), company.id, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Pipeline job не найден")
+    if not job['result_id'] or get_result(hunting_store(), company.id, job['result_id']) is None:
+        raise HTTPException(status_code=422, detail="Принятый архив не найден")
+    try:
+        reserved = retry_analysis(hunting_store(), company.id, job_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    try:
+        if reserved['task_id']:
+            from app.modules.hunting_campaigns import prepare_analysis_retry
+            prepare_analysis_retry(hunting_store(), company.id, reserved['task_id'], reserved['result_id'])
+        if hunting_external_worker_enabled():
+            from app.modules.hunting_pipeline import queue_job
+            reserved = queue_job(hunting_store(), company.id, reserved['id'])
+        else:
+            threading.Thread(target=run_analysis, args=(hunting_store(), hunting_store() / 'keys', company.id, job_id, reserved['result_id']), daemon=True).start()
+    except Exception as exc:
+        fail(hunting_store(), company.id, job_id, 'retry_start_failed', 'Не удалось запустить повтор анализа')
+        raise HTTPException(status_code=409, detail="Повтор анализа не запущен") from exc
+    write_audit(db, user, 'hunting_analysis_retry', f'job={job_id}', company.id)
+    db.commit()
+    return JSONResponse(reserved, status_code=202, headers={'Cache-Control': 'no-store'})
+
+
+@app.get("/api/threat-hunting/pipeline/stats")
+def hunting_pipeline_stats(company_id: int, user: User = Depends(get_user), db: Session = Depends(get_db)):
+    from app.modules.hunting_pipeline import operational_stats
+    company = resolve_company(user, db, company_id)
+    return JSONResponse(operational_stats(hunting_store(), company.id, int(os.getenv('HUNTING_WORKER_STALE_SECONDS', '1800'))), headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/threat-hunting/pipeline/jobs")
+def hunting_pipeline_jobs(company_id: int, campaign_id: str | None = None, offset: int = 0, limit: int = 50, user: User = Depends(get_user), db: Session = Depends(get_db)):
+    from app.modules.hunting_pipeline import list_jobs
+    company = resolve_company(user, db, company_id)
+    try:
+        return JSONResponse(list_jobs(hunting_store(), company.id, campaign_id, offset, limit), headers={"Cache-Control": "no-store"})
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/api/threat-hunting/results/retention")
+def hunting_retention(company_id: int, retention_days: int = 90, user: User = Depends(get_user), db: Session = Depends(get_db)):
+    from app.modules.hunting_results import retention_candidates
+    company = resolve_company(user, db, company_id)
+    return JSONResponse({'retention_days': retention_days, 'candidates': retention_candidates(hunting_store(), company.id, retention_days)}, headers={'Cache-Control': 'no-store'})
+
+
+@app.post("/api/threat-hunting/results/retention/purge")
+def hunting_retention_purge(company_id: int, retention_days: int = 90, dry_run: bool = True, user: User = Depends(get_user), db: Session = Depends(get_db)):
+    from app.modules.hunting_results import purge_retention_candidates
+    company = resolve_company(user, db, company_id)
+    result = purge_retention_candidates(hunting_store(), company.id, retention_days, dry_run)
+    write_audit(db, user, 'hunting_retention_purge', f"company={company.id}; dry_run={dry_run}; deleted={len(result['deleted'])}", company.id)
+    db.commit()
+    return JSONResponse(result, headers={'Cache-Control': 'no-store'})
+
+
+@app.get("/api/threat-hunting/results")
+def hunting_history(company_id: int, offset: int = 0, limit: int = 20, user: User = Depends(get_user), db: Session = Depends(get_db)):
+    from app.modules.hunting_results import history
+    company = resolve_company(user, db, company_id)
+    try:
+        result = history(hunting_store(), company.id, offset, limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+
+@app.delete("/api/threat-hunting/results/{result_id}")
+def hunting_result_delete(result_id: str, company_id: int, user: User = Depends(get_user), db: Session = Depends(get_db)):
+    from app.modules.hunting_results import delete_result, ResultInUseError
+    company = resolve_company(user, db, company_id)
+    try:
+        result = delete_result(hunting_store(), company.id, result_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Результат не найден") from exc
+    except ResultInUseError as exc:
+        raise HTTPException(status_code=409, detail="Результат используется активным заданием") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="Недопустимый путь хранения результата") from exc
+    write_audit(db, user, 'hunting_result_delete', f"id={result_id}", company.id)
+    db.commit()
+    return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/threat-hunting/results/integrity")
+def hunting_integrity(company_id: int, limit: int = 1000, user: User = Depends(get_user), db: Session = Depends(get_db)):
+    from app.modules.hunting_results import verify_integrity
+    company = resolve_company(user, db, company_id)
+    try:
+        result = verify_integrity(hunting_store(), company.id, limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    write_audit(db, user, 'hunting_integrity_check', f"company={company.id}; checked={result['checked']}; invalid={len(result['invalid'])}", company.id)
+    db.commit()
+    return JSONResponse(result, headers={'Cache-Control': 'no-store'})
+
+
+@app.get("/api/threat-hunting/results/{result_id}/export/{format}")
+def hunting_export(result_id: str, format: str, company_id: int, user: User = Depends(get_user), db: Session = Depends(get_db)):
+    from app.modules.hunting_results import analyze_result, finding_reviews, get_result, verify_integrity
+    from app.modules.hunting_reports import build_pdf, build_xlsx
+    company = resolve_company(user, db, company_id)
+    if format not in {"xlsx", "pdf"}:
+        raise HTTPException(status_code=422, detail="Поддерживаются только xlsx и pdf")
+    item = get_result(hunting_store(), company.id, result_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Результат не найден")
+    integrity = verify_integrity(hunting_store(), company.id, 5000)
+    if any(row["id"] == result_id for row in integrity["invalid"]):
+        raise HTTPException(status_code=409, detail="Архив evidence не прошёл проверку целостности")
+    try:
+        analysis = analyze_result(hunting_store(), hunting_store() / "keys", company.id, result_id)
+        reviews = finding_reviews(hunting_store(), company.id, result_id)
+        output = hunting_store() / "exports" / str(company.id) / f"{result_id}-forensic.{format}"
+        if format == "xlsx":
+            build_xlsx(output, item, analysis, reviews)
+            media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        else:
+            build_pdf(output, item, analysis, reviews)
+            media_type = "application/pdf"
+    except (KeyError, ValueError, OSError) as exc:
+        raise HTTPException(status_code=422, detail="Не удалось сформировать forensic export") from exc
+    write_audit(db, user, "hunting_forensic_export", f"result={result_id}; format={format}", company.id)
+    db.commit()
+    return FileResponse(output, media_type=media_type, filename=f"{result_id}-forensic.{format}", headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/threat-hunting/results/{result_id}/rows")
+def hunting_rows(result_id: str, company_id: int, source: str, offset: int = 0, limit: int = 25, user: User = Depends(get_user), db: Session = Depends(get_db)):
+    from app.modules.hunting_results import read_page
+    company = resolve_company(user, db, company_id)
+    try:
+        result = read_page(hunting_store(), hunting_store() / "keys", company.id, result_id, source, offset, limit)
+        write_audit(db, user, "hunting_rows_view", f"id={result_id}; offset={offset}; limit={limit}", company.id)
+        db.commit()
+        return JSONResponse(result, headers={"Cache-Control": "no-store"})
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Результат не найден") from exc
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=422, detail="Не удалось прочитать источник или страницу архива") from exc
+
+
+@app.post("/api/threat-hunting/results/{result_id}/analysis")
+def hunting_analysis(result_id: str, company_id: int, user: User = Depends(get_user), db: Session = Depends(get_db)):
+    from app.modules.hunting_results import analyze_result
+    company = resolve_company(user, db, company_id)
+    try:
+        result = analyze_result(hunting_store(), hunting_store() / "keys", company.id, result_id)
+        write_audit(db, user, "hunting_analysis", f"id={result_id}; ruleset={result['ruleset']}; matches={result['matched_rules']}", company.id)
+        db.commit()
+        return JSONResponse(result, headers={"Cache-Control": "no-store"})
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Результат не найден") from exc
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=422, detail="Не удалось проверить сохранённый архив") from exc
+
+
+class HuntingBuildIn(BaseModel):
+    company_id: int
+    campaign_id: str | None = Field(default=None, min_length=1, max_length=120)
+
+
+class HuntingWorkerClaimIn(BaseModel):
+    company_id: int
+    worker_id: str = Field(min_length=1, max_length=120)
+    lease_seconds: int = Field(default=300, ge=30, le=3600)
+
+
+class HuntingWorkerHeartbeatIn(BaseModel):
+    company_id: int
+    worker_id: str = Field(min_length=1, max_length=120)
+    lease_seconds: int = Field(default=300, ge=30, le=3600)
+
+
+class HuntingWorkerUpdateIn(BaseModel):
+    company_id: int
+    worker_id: str = Field(min_length=1, max_length=120)
+    status: str
+    progress_percent: int = Field(default=0, ge=0, le=100)
+    bytes_received: int = Field(default=0, ge=0)
+    rows_received: int = Field(default=0, ge=0)
+    result_id: str | None = Field(default=None, max_length=120)
+    error_code: str | None = Field(default=None, max_length=120)
+    error_message: str | None = Field(default=None, max_length=1000)
+
+
+class HuntingCampaignIn(BaseModel):
+    company_id: int
+    profile_id: str = Field(min_length=1, max_length=120)
+    hostnames: list[str] = Field(min_length=1, max_length=5000)
+    idempotency_key: str | None = Field(default=None, min_length=8, max_length=160)
+
+
+@app.post("/api/threat-hunting/campaigns", status_code=201)
+def hunting_campaign_create(payload: HuntingCampaignIn, user: User = Depends(get_user), db: Session = Depends(get_db)):
+    from app.modules.hunting_campaigns import create_campaign
+    company = resolve_company(user, db, payload.company_id)
+    profile = hunting_profiles.get_profile(hunting_store(), company.id, payload.profile_id)
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Профиль не найден")
+    key = payload.idempotency_key or secrets.token_urlsafe(24)
+    try:
+        result = create_campaign(hunting_store(), company.id, profile['id'], payload.hostnames, key, user.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    write_audit(db, user, "hunting_campaign_create", f"campaign={result['id']}; hosts={result['total_hosts']}", company.id)
+    db.commit()
+    return JSONResponse(result, status_code=201, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/threat-hunting/campaigns")
+def hunting_campaign_list(company_id: int, offset: int = 0, limit: int = 20, user: User = Depends(get_user), db: Session = Depends(get_db)):
+    from app.modules.hunting_campaigns import list_campaigns
+    company = resolve_company(user, db, company_id)
+    try:
+        return JSONResponse(list_campaigns(hunting_store(), company.id, offset, limit), headers={"Cache-Control": "no-store"})
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/threat-hunting/campaigns/{campaign_id}/reconcile")
+def hunting_campaign_reconcile(campaign_id: str, company_id: int, user: User = Depends(get_user), db: Session = Depends(get_db)):
+    from app.modules.hunting_campaigns import reconcile_campaign
+    company = resolve_company(user, db, company_id)
+    repaired = reconcile_campaign(hunting_store(), company.id, campaign_id)
+    return JSONResponse({"repaired": repaired}, headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/threat-hunting/campaigns/reconcile")
+def hunting_campaign_reconcile_all(company_id: int, user: User = Depends(get_user), db: Session = Depends(get_db)):
+    from app.modules.hunting_campaigns import reconcile_all
+    company = resolve_company(user, db, company_id)
+    result = reconcile_all(hunting_store(), company.id)
+    write_audit(db, user, 'hunting_campaign_reconcile_all', f'company={company.id}; repaired={len(result)}', company.id)
+    db.commit()
+    return JSONResponse({'repaired': result}, headers={'Cache-Control': 'no-store'})
+
+
+@app.get("/api/threat-hunting/campaigns/{campaign_id}")
+def hunting_campaign_get(campaign_id: str, company_id: int, user: User = Depends(get_user), db: Session = Depends(get_db)):
+    from app.modules.hunting_campaigns import get_campaign
+    company = resolve_company(user, db, company_id)
+    result = get_campaign(hunting_store(), company.id, campaign_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Кампания не найдена")
+    return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/threat-hunting/workers/claim")
+def hunting_worker_claim(payload: HuntingWorkerClaimIn, user: User = Depends(get_user), db: Session = Depends(get_db)):
+    from app.modules.hunting_campaigns import claim_task
+    company = resolve_company(user, db, payload.company_id)
+    try:
+        result = claim_task(hunting_store(), company.id, payload.worker_id, payload.lease_seconds)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return JSONResponse({"task": result}, headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/threat-hunting/workers/tasks/{task_id}/heartbeat")
+def hunting_worker_heartbeat(task_id: str, payload: HuntingWorkerHeartbeatIn, user: User = Depends(get_user), db: Session = Depends(get_db)):
+    from app.modules.hunting_campaigns import heartbeat_task
+    company = resolve_company(user, db, payload.company_id)
+    try:
+        result = heartbeat_task(hunting_store(), company.id, task_id, payload.worker_id, payload.lease_seconds)
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="Задание не найдено")
+    return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/threat-hunting/workers/tasks/{task_id}")
+def hunting_worker_update(task_id: str, payload: HuntingWorkerUpdateIn, user: User = Depends(get_user), db: Session = Depends(get_db)):
+    from app.modules.hunting_campaigns import update_task
+    company = resolve_company(user, db, payload.company_id)
+    try:
+        result = update_task(hunting_store(), company.id, task_id, payload.worker_id, payload.status, payload.progress_percent, payload.bytes_received, payload.rows_received, payload.result_id, payload.error_code, payload.error_message)
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="Задание не найдено")
+    return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/threat-hunting/campaigns/{campaign_id}/tasks")
+def hunting_campaign_tasks(campaign_id: str, company_id: int, status: str | None = None, offset: int = 0, limit: int = 100, user: User = Depends(get_user), db: Session = Depends(get_db)):
+    from app.modules.hunting_campaigns import list_tasks
+    company = resolve_company(user, db, company_id)
+    try:
+        return JSONResponse(list_tasks(hunting_store(), company.id, campaign_id, status, offset, limit), headers={"Cache-Control": "no-store"})
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/api/threat-hunting/results/{result_id}/forensic")
+def hunting_forensic_result(result_id: str, company_id: int, user: User = Depends(get_user), db: Session = Depends(get_db)):
+    from app.modules.hunting_results import analyze_result, get_result, finding_reviews
+    from app.modules.hunting_pipeline import list_jobs, events
+    company = resolve_company(user, db, company_id)
+    item = get_result(hunting_store(), company.id, result_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Результат не найден")
+    try:
+        analysis = analyze_result(hunting_store(), hunting_store() / "keys", company.id, result_id)
+    except (KeyError, ValueError, OSError) as exc:
+        raise HTTPException(status_code=422, detail="Не удалось подготовить forensic result") from exc
+    jobs = list_jobs(hunting_store(), company.id, limit=500)['items']
+    job = next((x for x in jobs if x.get('result_id') == result_id), None)
+    timeline = events(hunting_store(), company.id, job['id']) if job else []
+    # Evidence projections are captured during the verified archive pass; avoid
+    # decrypting/re-parsing the same archive once per finding.
+    evidence = analysis.get('findings', [])
+    reviews = finding_reviews(hunting_store(), company.id, result_id)
+    review_map = {item['finding_key']: item for item in reviews}
+    evidence = [{**finding, 'review': review_map.get('|'.join(str(finding.get(key, '')) for key in ('rule_id', 'source', 'row_number')))} for finding in evidence]
+    analysis['findings'] = evidence
+    return JSONResponse({"result": item, "analysis": analysis, "findings": evidence, "reviews": reviews, "pipeline": job, "timeline": timeline}, headers={"Cache-Control": "no-store"})
+
+
+class HuntingFindingReviewIn(BaseModel):
+    company_id: int
+    result_id: str = Field(min_length=1, max_length=120)
+    finding: dict[str, Any]
+    status: str
+    note: str = Field(min_length=3, max_length=4000)
+
+
+@app.post("/api/threat-hunting/findings/review")
+def hunting_finding_review(payload: HuntingFindingReviewIn, user: User = Depends(get_user), db: Session = Depends(get_db)):
+    from app.modules.hunting_results import get_result, review_finding
+    company = resolve_company(user, db, payload.company_id)
+    if get_result(hunting_store(), company.id, payload.result_id) is None:
+        raise HTTPException(status_code=404, detail='Результат не найден')
+    try:
+        result = review_finding(hunting_store(), company.id, payload.result_id, payload.finding, payload.status, payload.note, user.id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    write_audit(db, user, 'hunting_finding_review', f"result={payload.result_id}; status={payload.status}; finding={result['finding_key']}", company.id)
+    db.commit()
+    return JSONResponse(result, headers={'Cache-Control': 'no-store'})
+
+
+@app.post("/api/threat-hunting/tasks/{task_id}/retry")
+def hunting_task_retry(task_id: str, company_id: int, user: User = Depends(get_user), db: Session = Depends(get_db)):
+    from app.modules.hunting_campaigns import retry_task
+    company = resolve_company(user, db, company_id)
+    try:
+        result = retry_task(hunting_store(), company.id, task_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="Задание не найдено")
+    write_audit(db, user, "hunting_task_retry", f"task={task_id}", company.id)
+    db.commit()
+    return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/threat-hunting/campaigns/{campaign_id}/{action}")
+def hunting_campaign_action(campaign_id: str, action: str, company_id: int, user: User = Depends(get_user), db: Session = Depends(get_db)):
+    from app.modules.hunting_campaigns import change_campaign
+    company = resolve_company(user, db, company_id)
+    try:
+        result = change_campaign(hunting_store(), company.id, campaign_id, action)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="Кампания не найдена")
+    write_audit(db, user, f"hunting_campaign_{action}", f"campaign={campaign_id}", company.id)
+    db.commit()
+    return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/threat-hunting/profiles/{profile_id}/package")
+def hunting_package(profile_id: str, payload: HuntingBuildIn, user: User = Depends(get_user), db: Session = Depends(get_db)):
+    import io
+    import zipfile
+    from fastapi.responses import Response
+    from app.modules.hunting_packager import build_package
+    from app.modules.hunting_runtime import trusted_tools
+    company = resolve_company(user, db, payload.company_id)
+    row = hunting_profiles.get_profile(hunting_store(), company.id, profile_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Профиль не найден")
+    try:
+        engine, target, engine_hash, target_hash = trusted_tools(row['platform'])
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if payload.campaign_id:
+        from app.modules.hunting_campaigns import get_campaign
+        campaign = get_campaign(hunting_store(), company.id, payload.campaign_id)
+        if campaign is None:
+            raise HTTPException(status_code=404, detail="Кампания не найдена")
+        row = {**row, 'campaign_id': payload.campaign_id}
+    try:
+        data, manifest = build_package(row, hunting_store() / "keys", engine, target, engine_hash, target_hash)
+        archive = io.BytesIO()
+        executable = "BroSec-Collector.exe" if row['platform'] == 'windows' else "BroSec-Collector"
+        with zipfile.ZipFile(archive, 'w', compression=zipfile.ZIP_STORED) as package:
+            info = zipfile.ZipInfo(executable)
+            info.create_system = 3
+            info.external_attr = 0o100755 << 16
+            package.writestr(info, data)
+            package.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
+        write_audit(db, user, "hunting_package_create", f"profile={row['id']}; sha256={manifest['executable_sha256']}", company.id)
+        db.commit()
+        return Response(archive.getvalue(), media_type="application/zip", headers={"Content-Disposition": f'attachment; filename="brosec-collector-{row["id"]}.zip"', "Cache-Control": "no-store"})
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+class HuntingConfigIn(BaseModel):
+    company_id: int
+    public_certificate: str = Field(min_length=100, max_length=16384)
+
+
+@app.post("/api/threat-hunting/profiles/{profile_id}/config")
+def hunting_compile(profile_id: str, payload: HuntingConfigIn, user: User = Depends(get_user), db: Session = Depends(get_db)):
+    from app.modules.hunting_builder import compile_config
+    company = resolve_company(user, db, payload.company_id)
+    row = hunting_profiles.get_profile(hunting_store(), company.id, profile_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Профиль не найден")
+    try:
+        data, manifest = compile_config(row, payload.public_certificate)
+    except (ValueError, UnicodeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    write_audit(db, user, "hunting_config_compile", f"profile={row['id']}; config_sha256={manifest['config_sha256']}", company.id)
+    db.commit()
+    return JSONResponse({"config": json.loads(data), "config_text": data.decode("utf-8"), "manifest": manifest}, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/threat-hunting/profiles/{profile_id}/spec")
+def hunting_spec(profile_id: str, company_id: int, user: User = Depends(get_user), db: Session = Depends(get_db)):
+    company = resolve_company(user, db, company_id)
+    row = hunting_profiles.get_profile(hunting_store(), company.id, profile_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Профиль не найден")
+    return JSONResponse(hunting_profiles.export_spec(row), headers={"Content-Disposition": f'attachment; filename="brosec-profile-{row["id"]}.json"', "Cache-Control": "no-store"})
+
+
 @app.post("/api/honeytokens/generate")
 def generate_honeytokens(payload: HoneyIn, user: User = Depends(get_user), db: Session = Depends(get_db)) -> dict[str, str]:
     company = resolve_company(user, db, payload.company_id)
@@ -3322,3 +4225,9 @@ def generate_honeytokens(payload: HoneyIn, user: User = Depends(get_user), db: S
     )
     db.commit()
     return {"script": script, "title": f"Ловушки для {company.domain}"}
+
+
+# Host-only AI report exports use the same authorization dependencies as investigation.
+from app.modules.hunting_ai_reports import register_ai_report_routes
+register_ai_report_routes(app, get_user=get_user, get_db=get_db, resolve_company=resolve_company,
+                          hunting_store=hunting_store, write_audit=write_audit)

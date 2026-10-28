@@ -1,3 +1,20 @@
+## 2.6.24 — 2026-10-28
+
+### Threat Hunting
+
+- Default triage view now prioritizes high-fidelity suspicious behavior instead of routine baseline noise.
+- AI triage correlates the complete finding inventory and requires exact evidence citations while separating facts, hypotheses, alternatives, and gaps.
+- Added bounded deterministic cross-host correlation with bilateral evidence for SHA-256 and qualified domain identities.
+- Excluded local and built-in principals from cross-host links to prevent false campaign relationships.
+- Preserved full-context access for routine paths, services, and public endpoints without treating them as compromise or C2 proof.
+- Added fail-closed collector contracts, tenant isolation coverage, bounded processing tests, and Windows persistence compilation coverage.
+- Production deployment verified on `10.191.122.183`; core and worker use the same analysis code.
+
+### Validation
+
+- 198 automated tests passed; one Velociraptor-engine test remains skipped when the external engine is unavailable.
+- Production health endpoint returned `ready`; unauthenticated Threat Hunting API access returned `401`.
+
 # Журнал изменений
 
 Версии отмечены тегами. В репозитории нет результатов сканирования, базы, сертификатов и секретов.

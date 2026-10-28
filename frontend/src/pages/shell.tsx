@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { Bell, BookOpen, Bot, FileText, LayoutDashboard, Menu, Monitor, Network, Palette, Radar, Settings, Siren, Sparkles, Users, UserRound, Waypoints } from "lucide-react"
+import { Bell, BookOpen, Bot, FileText, LayoutDashboard, LoaderCircle, Menu, Monitor, Network, Palette, Radar, Settings, Siren, Crosshair, Users, UserRound, Waypoints } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -24,6 +24,7 @@ import { Catalog } from "@/pages/catalog"
 import { ProfilePage, SecurityPage } from "@/pages/profile"
 import { RELEASES } from "@/lib/releases"
 import { ScanDock } from "@/components/scan-progress"
+import { Hunting } from "@/pages/hunting"
 
 const NAV: { group: string; items: { id: View; icon: typeof LayoutDashboard }[] }[] = [
   { group: "nav.g.overview", items: [
@@ -37,6 +38,7 @@ const NAV: { group: string; items: { id: View; icon: typeof LayoutDashboard }[] 
   ] },
   { group: "nav.g.platform", items: [
     { id: "scan", icon: Radar },
+    { id: "hunting", icon: Crosshair },
     { id: "assistant", icon: Bot },
   ] },
 ]
@@ -50,6 +52,8 @@ export function Shell() {
   const app = useApp()
   const version = app.me?.version || "2.1.0"
   const [menu, setMenu] = useState(false)
+  const [huntingExpanded, setHuntingExpanded] = useState(app.view.startsWith("hunting"))
+  useEffect(() => { if (app.view.startsWith("hunting")) setHuntingExpanded(true) }, [app.view])
   const [bell, setBell] = useState(false)
   const [deliveryTick, setDeliveryTick] = useState(0)
   const [welcome, setWelcome] = useState(false)
@@ -82,6 +86,10 @@ export function Shell() {
     notes: <Notes />,
     profile: <ProfilePage />,
     security: <SecurityPage />,
+    hunting: <Hunting key={app.companyId} section="hq" />,
+    "hunting-investigations": <Hunting key={app.companyId} section="investigations" />,
+    "hunting-analytics": <Hunting key={app.companyId} section="analytics" />,
+    "hunting-collection": <Hunting key={app.companyId} section="collection" />,
   }
 
   function choose(view: View) {
@@ -102,7 +110,7 @@ export function Shell() {
           <img src="/static/logo.png" alt="" className="size-12 rounded-xl object-contain" />
           <div>
             <strong className="block text-sm">BroSec Audit AD</strong>
-            <span className="text-muted-foreground text-xs">v{version}</span>
+            <button type="button" className="text-muted-foreground hover:text-foreground text-left text-xs underline-offset-2 hover:underline" onClick={() => choose("notes")}>v{version}</button>
           </div>
         </div>
         {NAV.map((group) => (
@@ -110,6 +118,15 @@ export function Shell() {
             <div className="text-muted-foreground px-3 py-1 text-[11px] tracking-wide uppercase">{app.t(group.group)}</div>
             {group.items.map((item) => {
               const Icon = item.icon
+              if (item.id === "hunting") return <div key={item.id} className="mb-2">
+                <div className="flex items-center gap-1">
+                  <Button variant={app.view.startsWith("hunting") ? "secondary" : "ghost"} className="min-w-0 flex-1 justify-start" aria-expanded={huntingExpanded} aria-controls="hunting-subnav" onClick={() => { setHuntingExpanded(app.view.startsWith("hunting") ? !huntingExpanded : true); choose("hunting") }}><Icon />Threat Hunting</Button>
+                  
+                </div>
+                {huntingExpanded && <nav id="hunting-subnav" aria-label="Разделы Threat Hunting" className="ml-4 mt-1 space-y-1 border-l pl-2">
+                  {([ ["hunting", "Штаб безопасности"], ["hunting-investigations", "Анализ и расследования"], ["hunting-analytics", "Аналитика и отчёты"], ["hunting-collection", "Сбор и импорт"] ] as [View, string][]).map(([id, label]) => <Button key={id} variant={app.view === id ? "secondary" : "ghost"} aria-current={app.view === id ? "page" : undefined} className="h-auto min-h-9 w-full justify-start whitespace-normal py-2 text-left text-xs" onClick={() => choose(id)}>{label}</Button>)}
+                </nav>}
+              </div>
               return (
                 <Button key={item.id} variant={app.view === item.id ? "secondary" : "ghost"} className="mb-1 w-full justify-start" onClick={() => choose(item.id)}>
                   <Icon />
@@ -144,18 +161,21 @@ export function Shell() {
           <Input className="max-w-xl rounded-full" value={app.filters.q} placeholder={app.t("search")} onChange={(event) => app.patchFilters({ q: event.target.value })} />
           {app.me?.is_superadmin ? (
             <Select value={String(app.companyId || "")} onValueChange={(value) => void app.setCompany(Number(value))}>
-              <SelectTrigger className="hidden w-48 sm:flex"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="hidden w-48 sm:flex" disabled={app.companySwitching} aria-label="Активная компания">
+                {app.companySwitching ? <span className="flex items-center gap-2"><LoaderCircle className="size-4 animate-spin" />Загрузка…</span> : <SelectValue />}
+              </SelectTrigger>
               <SelectContent>
                 {app.companies.map((row) => <SelectItem key={row.id} value={String(row.id)}>{row.name}</SelectItem>)}
               </SelectContent>
             </Select>
           ) : <span className="text-muted-foreground hidden truncate text-sm sm:block">{app.company?.name}</span>}
+          {app.companySwitching ? <span className="text-muted-foreground hidden items-center gap-1 text-xs md:flex"><LoaderCircle className="size-3 animate-spin" />Контекст компании обновляется</span> : null}
           <div className="ml-auto flex items-center gap-1">
             <Button variant="outline" size="icon" className="relative" onClick={() => setBell(true)} aria-label={app.t("nav.notices")}>
               <Bell />
               {unread ? <span className="absolute -top-1 -right-1 grid min-w-5 place-items-center rounded-full bg-red-500 px-1 text-[10px] text-white">{unread}</span> : null}
             </Button>
-            <Button variant="outline" size="sm" onClick={() => choose("assistant")}><Sparkles />{app.t("nav.assistant")}</Button>
+            <Button variant="outline" size="sm" onClick={() => choose("assistant")}><Bot />{app.t("nav.assistant")}</Button>
             <ThemePalette />
             <Select value={app.lang} onValueChange={(value) => app.setLang(value as "ru" | "en")}>
               <SelectTrigger className="w-16"><SelectValue /></SelectTrigger>
@@ -182,6 +202,7 @@ export function Shell() {
           </div>
         </header>
         <main className="p-3 pb-24 md:p-5">
+          {app.companySwitching ? <div className="mb-3 flex items-center gap-2 rounded-xl border border-sky-500/40 bg-sky-500/10 px-3 py-2 text-sm text-sky-700 dark:text-sky-300" role="status"><LoaderCircle className="size-4 animate-spin" /> Загружаем изолированный контекст выбранной компании…</div> : null}
           {app.directory && !app.directory.ok ? (
             <div className="mb-3 rounded-xl border border-red-500/50 bg-red-500/10 px-3 py-2 text-sm">Каталог не отвечает. {app.directory.detail || "Проверьте LDAP в настройках."}</div>
           ) : null}
@@ -282,7 +303,7 @@ function ThemePalette() {
       <Button variant="outline" size="icon" aria-label="Тема" onClick={() => setOpen((value) => !value)}><Palette /></Button>
       {open ? (
         <div className="bg-popover absolute right-0 z-40 mt-2 w-44 rounded-lg border p-1">
-          {(["dark", "light", "cyber"] as Theme[]).map((theme) => (
+          {(["dark", "light"] as Theme[]).map((theme) => (
             <Button key={theme} variant={app.theme === theme ? "secondary" : "ghost"} className="w-full justify-start" onClick={() => { app.setTheme(theme); setOpen(false) }}>
               <span className={"size-3 rounded-full " + (theme === "dark" ? "bg-zinc-700" : theme === "light" ? "bg-white ring-1 ring-zinc-300" : "bg-pink-500")} />
               {app.t("theme." + theme)}

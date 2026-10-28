@@ -163,67 +163,33 @@ html[data-theme="dark"] {
 }
 
 html[data-theme="light"] {
-  --background: #f3f6fb;
-  --foreground: #1c2744;
+  --background: #eef2f7;
+  --foreground: #172033;
   --card: #ffffff;
-  --card-foreground: #1c2744;
+  --card-foreground: #172033;
   --popover: #ffffff;
-  --popover-foreground: #1c2744;
-  --primary: #2563eb;
+  --popover-foreground: #172033;
+  --primary: #1d4ed8;
   --primary-foreground: #ffffff;
-  --secondary: #e8f0ff;
-  --secondary-foreground: #1c2744;
-  --muted: #f8fafc;
-  --muted-foreground: #66718c;
-  --accent: #e8f0ff;
-  --accent-foreground: #1c2744;
-  --border: #e4eaf3;
-  --input: #e4eaf3;
-  --ring: #2563eb;
+  --secondary: #e2e8f0;
+  --secondary-foreground: #172033;
+  --muted: #e8edf3;
+  --muted-foreground: #526078;
+  --accent: #dbeafe;
+  --accent-foreground: #172033;
+  --border: #cbd5e1;
+  --input: #cbd5e1;
+  --ring: #1d4ed8;
   --sidebar: #ffffff;
   --sidebar-foreground: #1c2744;
   --sidebar-accent: #e8f0ff;
   --sidebar-accent-foreground: #1c2744;
-  --sidebar-border: #e4eaf3;
+  --sidebar-border: #cbd5e1;
   --chart-1: #14b8a6;
   --chart-2: #38bdf8;
   --chart-3: #6366f1;
   --chart-4: #f59e0b;
   --chart-5: #ef4444;
-}
-
-html[data-theme="cyber"] {
-  --background: #07061a;
-  --foreground: #f4f7ff;
-  --card: #14102a;
-  --card-foreground: #f4f7ff;
-  --popover: #14102a;
-  --popover-foreground: #f4f7ff;
-  --primary: #e14bff;
-  --primary-foreground: #ffffff;
-  --secondary: rgba(225, 75, 255, .16);
-  --secondary-foreground: #f4f7ff;
-  --muted: #100c22;
-  --muted-foreground: #b9c0dc;
-  --accent: rgba(225, 75, 255, .16);
-  --accent-foreground: #f4f7ff;
-  --border: rgba(176, 92, 255, .42);
-  --input: rgba(176, 92, 255, .42);
-  --ring: #3ecbff;
-  --sidebar: #0c0820;
-  --sidebar-foreground: #f4f7ff;
-  --sidebar-accent: rgba(225, 75, 255, .16);
-  --sidebar-accent-foreground: #f4f7ff;
-  --sidebar-border: rgba(176, 92, 255, .42);
-  --chart-1: #e14bff;
-  --chart-2: #3ecbff;
-  --chart-3: #ff9f1a;
-  --chart-4: #2ee59d;
-  --chart-5: #ff3b5c;
-}
-
-html[data-theme="cyber"] [data-slot="card"] {
-  box-shadow: 0 0 28px rgba(120, 60, 220, .14);
 }
 
 @keyframes brosec-sheen {
@@ -238,9 +204,18 @@ html[data-theme="cyber"] [data-slot="card"] {
   animation: brosec-sheen 0.85s linear infinite;
 }
 
-html[data-theme="cyber"] body {
-  background:
-    radial-gradient(720px 280px at 100% -8%, rgba(225, 75, 255, .14), transparent 55%),
-    radial-gradient(560px 240px at 0% 0%, rgba(62, 203, 255, .08), transparent 50%),
-    var(--background);
+/* Threat Hunting uses the same surfaces and tokens as the rest of BroSec. */
+.hunting-workspace {
+  color: var(--foreground);
 }
+.hunting-workspace button {
+  transition: border-color .16s ease, background-color .16s ease;
+}
+.hunting-workspace .font-mono {
+  font-family: 'JetBrains Mono', Consolas, monospace;
+}
+.hunting-workspace :is(input, select, textarea):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+@media(prefers-reduced-motion:reduce){.hunting-workspace *{animation:none!important;transition:none!important;scroll-behavior:auto!important}}

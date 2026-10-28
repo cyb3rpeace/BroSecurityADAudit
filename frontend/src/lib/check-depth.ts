@@ -60,6 +60,34 @@ const BY_ID: Record<string, { tech: string; links: SourceLink[] }> = {
     tech: "Читается msDS-Behavior-Version на ncName домена (rootDSE defaultNamingContext). Значение 0–7 соответствует режимам от Windows 2000 до Windows Server 2016. Это не версия ОС контроллера: её смотрите в operatingSystem на объекте компьютера контроллера.",
     links: [LDAP],
   },
+  display_menu: {
+    tech: "Атрибут adminContextMenu у displaySpecifier пользователя. В карточку попадает только факт, что пункт добавлен. Строка команды не копируется.",
+    links: [ACL],
+  },
+  anonymous_ldap: {
+    tech: "Отдельная привязка LDAP с пустым именем. Если сервер её принимает, пишется одно отклонение. Поиск объектов этой сессией не выполняется.",
+    links: [LDAP],
+  },
+  dangerous_ou_right: {
+    tech: "У подразделений читается список доступа. Отклонение ставится, если Everyone, Authenticated Users, Domain Users или Domain Computers имеют полный доступ, запись, смену владельца или смену списка прав. Остальные записи списка не копируются.",
+    links: [ACL],
+  },
+  adcs_weak_key: {
+    tech: "msPKI-Minimal-Key-Size шаблона. Порог 2048. Открытый ключ выпущенных сертификатов не копируется, запрос в центр сертификации не отправляется.",
+    links: [ADCS],
+  },
+  dns_zone: {
+    tech: "Свойства зоны Windows DNS: динамические обновления, передача, DNSSEC, очистка и состав по типам записей. Имена здоровых записей не сохраняются.",
+    links: [DNS],
+  },
+  replication_stale: {
+    tech: "Get-ADReplicationPartnerMetadata: партнёр, раздел и давность успеха. Текст ошибки репликации не сохраняется.",
+    links: [LDAP],
+  },
+  gpo_conflict: {
+    tech: "Сравниваются GptTmpl.inf и часть Registry.pol. Значение, похожее на пароль, заменяется пометкой «скрыто».",
+    links: [GPO],
+  },
   machine_quota: {
     tech: "Атрибут ms-DS-MachineAccountQuota на объекте домена. По умолчанию 10: любой Authenticated Users может создать computer object, если у него нет явного запрета. Квота 0 оставляет создание компьютеров группам, которым делегирован Create Child.",
     links: [ACL],

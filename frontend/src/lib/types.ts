@@ -1,5 +1,5 @@
 export type Lang = "ru" | "en"
-export type Theme = "dark" | "light" | "cyber"
+export type Theme = "dark" | "light"
 export type View =
   | "overview"
   | "incidents"
@@ -16,6 +16,10 @@ export type View =
   | "catalog"
   | "profile"
   | "security"
+  | "hunting"
+  | "hunting-investigations"
+  | "hunting-analytics"
+  | "hunting-collection"
 
 export type Me = {
   username: string

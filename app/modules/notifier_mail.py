@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 import html
+import ipaddress
 import os
 import smtplib
+import ssl
+import socket
+import re
 from email.message import EmailMessage
 from pathlib import Path
+
+from .email_template import render_html
 
 
 _SEV = {
@@ -27,20 +33,22 @@ def _badge(severity: str) -> str:
 
 
 def _rows(findings: list[dict]) -> str:
-    body = []
+    cards = []
     for item in findings[:25]:
-        body.append(
-            "<tr>"
-            f'<td style="padding:12px;border-bottom:1px solid #27272a;vertical-align:top;">{_badge(str(item.get("severity", "")))}</td>'
-            f'<td style="padding:12px;border-bottom:1px solid #27272a;color:#e4e4e7;vertical-align:top;">{html.escape(str(item.get("hostname", "") or "—"))}</td>'
-            f'<td style="padding:12px;border-bottom:1px solid #27272a;color:#fafafa;vertical-align:top;">{html.escape(str(item.get("title", "")))}</td>'
-            "</tr>"
+        host = html.escape(str(item.get("hostname", "") or "объект не указан"))
+        title = html.escape(str(item.get("title", "") or "Находка"))
+        cards.append(
+            '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+            'style="margin:0 0 10px;background:#18181b;border:1px solid #27272a;border-radius:8px;">'
+            '<tr><td style="padding:14px 16px;">'
+            f'{_badge(str(item.get("severity", "")))}'
+            f'<div style="padding-top:8px;font-size:15px;font-weight:650;line-height:1.35;color:#fafafa;">{title}</div>'
+            f'<div style="padding-top:4px;font-size:13px;color:#a1a1aa;">{host}</div>'
+            "</td></tr></table>"
         )
-    if not body:
-        body.append(
-            '<tr><td colspan="3" style="padding:16px;color:#a1a1aa;">Новых находок в этом письме нет.</td></tr>'
-        )
-    return "".join(body)
+    if not cards:
+        return '<div style="color:#a1a1aa;font-size:14px;">Новых находок в этом письме нет.</div>'
+    return "".join(cards)
 
 
 def _counts(findings: list[dict]) -> str:
@@ -53,9 +61,9 @@ def _counts(findings: list[dict]) -> str:
         color, label = _SEV[key]
         chips.append(
             f'<td style="padding:0 8px 0 0;">'
-            f'<div style="background:#18181b;border:1px solid #27272a;border-radius:12px;padding:10px 14px;min-width:92px;">'
-            f'<div style="color:#a1a1aa;font-size:11px;">{label}</div>'
-            f'<div style="color:{color};font-size:22px;font-weight:650;line-height:1.2;">{amount}</div>'
+            f'<div style="background:#18181b;border:1px solid #27272a;border-radius:8px;padding:12px 16px;min-width:96px;">'
+            f'<div style="color:#a1a1aa;font-size:12px;">{label}</div>'
+            f'<div style="color:{color};font-size:26px;font-weight:750;line-height:1.15;padding-top:4px;">{amount}</div>'
             f"</div></td>"
         )
     if not chips:
@@ -63,7 +71,74 @@ def _counts(findings: list[dict]) -> str:
     return f'<table role="presentation" style="border-collapse:separate;margin:0 0 18px;"><tr>{"".join(chips)}</tr></table>'
 
 
-def send_report(
+def platform_url() -> str:
+    return (os.getenv("APP_PUBLIC_URL") or "").strip().rstrip("/")
+
+
+def usable_address(value: str) -> str:
+    text = (value or "").strip()
+    # Settings accept one bare mailbox, not lists or mail headers.
+    if not re.fullmatch(r"[^\s@<>,;:\x00-\x1f\x7f]+@[^\s@<>,;:\x00-\x1f\x7f]+", text):
+        return ""
+    domain = text.split("@", 1)[1].lower()
+    if domain in {"local", "company.local", "example.com", "example.local"}:
+        return ""
+    return text
+
+
+def _configuration_error(reason: str) -> dict[str, str | bool]:
+    return {"ok": False, "error": "Почта не настроена: " + reason + "."}
+
+
+def _smtp_settings(channel: dict, recipient: str | None) -> dict:
+    """Resolve DB/channel overrides before environment; never include secret values in errors."""
+    def env(name):
+        return "" if channel.get("tenant_scoped") else os.getenv(name)
+    server = (channel.get("server") or env("SMTP_SERVER") or "").strip()
+    if not server:
+        return _configuration_error("укажите сервер SMTP (smtp_server / SMTP_SERVER)")
+    if server.lower().rstrip(".") in {"company.local", "smtp.company.local"}:
+        return _configuration_error("замените шаблон SMTP_SERVER / smtp_server реальным DNS-именем SMTP")
+    try:
+        ipaddress.ip_address(server)
+        is_ip = True
+    except ValueError:
+        is_ip = False
+    if not is_ip and re.search(r"[\s/@:#?\x00-\x1f\x7f]", server):
+        return _configuration_error("SMTP_SERVER / smtp_server должен содержать только имя сервера или IP, без URL и порта")
+    raw_port = channel.get("port")
+    if raw_port is None or raw_port == "":
+        raw_port = env("SMTP_PORT") or "587"
+    try:
+        if isinstance(raw_port, bool) or not re.fullmatch(r"[0-9]+", str(raw_port)):
+            raise ValueError
+        port = int(raw_port)
+        if not 1 <= port <= 65535:
+            raise ValueError
+    except (TypeError, ValueError):
+        return _configuration_error("порт SMTP должен быть числом от 1 до 65535 (smtp_port / SMTP_PORT)")
+    security = (channel.get("security") or env("SMTP_SECURITY") or "").strip().lower()
+    if security not in {"", "none", "starttls", "ssl"}:
+        return _configuration_error("защита SMTP — none, starttls или ssl (smtp_security / SMTP_SECURITY)")
+    username = (channel.get("username") or env("SMTP_USER") or "").strip()
+    password = channel.get("password") if channel.get("password") is not None else (env("SMTP_PASSWORD") or "")
+    sender_value = channel.get("sender") or env("SMTP_FROM") or username
+    target_value = recipient if recipient and recipient.strip() else (env("SMTP_TO") or username)
+    sender = usable_address(sender_value)
+    target = usable_address(target_value)
+    if not sender:
+        return _configuration_error("неверный или отсутствующий адрес отправителя (smtp_from / SMTP_FROM)")
+    if not target:
+        return _configuration_error("неверный или отсутствующий адрес получателя (notify_email / SMTP_TO)")
+    if password == "password":
+        return _configuration_error("замените шаблон пароля SMTP реальными учетными данными или очистите учетные данные для доверенного relay")
+    if bool(username) != bool(password):
+        return _configuration_error("для SMTP AUTH задайте и пользователя, и пароль; для relay очистите оба поля")
+    return dict(server=server, port=port, security=security, username=username,
+                password=password, sender=sender, target=target)
+
+
+def _send_report(
     company_name: str,
     summary: str,
     findings: list[dict],
@@ -75,20 +150,21 @@ def send_report(
     include_findings: bool = True,
 ) -> dict[str, str | bool]:
     channel = channel or {}
-    server = (channel.get("server") or os.getenv("SMTP_SERVER") or "").strip()
-    sender = (channel.get("sender") or os.getenv("SMTP_FROM") or os.getenv("SMTP_USER") or "").strip()
-    target = (recipient or os.getenv("SMTP_TO") or os.getenv("SMTP_USER") or "").strip()
-    if not server or server.endswith("company.local") or not sender or not target:
-        return {"ok": False, "error": "Почта не настроена: укажите сервер, адрес отправителя и получателя."}
-    port = int(channel.get("port") or os.getenv("SMTP_PORT") or "587")
-    security = (channel.get("security") or "").strip().lower()
-    username = (channel.get("username") or os.getenv("SMTP_USER") or "").strip()
-    password = channel.get("password") if channel.get("password") is not None else (os.getenv("SMTP_PASSWORD") or "")
+    settings = _smtp_settings(channel, recipient)
+    if settings.get("ok") is False:
+        return settings
+    server, port, security = settings["server"], settings["port"], settings["security"]
+    username, password = settings["username"], settings["password"]
+    sender, target = settings["sender"], settings["target"]
     message = EmailMessage()
     message["Subject"] = subject or f"Паспорт безопасности домена — {company_name}"
     message["From"] = sender
     message["To"] = target
-    message.set_content(summary or "Сводка проверки BroSec Audit AD.")
+    link = platform_url()
+    plain = summary or "Сводка проверки BroSec Audit AD."
+    if link:
+        plain = plain + "\n\nПерейти в платформу: " + link
+    message.set_content(plain)
     shown = findings[:25]
     more = len(findings) - len(shown)
     more_line = f'<p style="margin:12px 0 0;color:#a1a1aa;font-size:12px;">В письме первые {len(shown)} из {len(findings)}. Остальные {more} остаются в консоли.</p>' if more > 0 else ""
@@ -96,46 +172,25 @@ def send_report(
     findings_block = ""
     if include_findings:
         findings_block = f"""
-        <tr><td style="padding:18px 28px 8px;color:#fafafa;font-size:14px;font-weight:650;">Находки</td></tr>
-        <tr><td style="padding:0 28px 8px;">
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:14px;">
-            <tr>
-              <th align="left" style="padding:8px 12px;border-bottom:1px solid #3f3f46;color:#a1a1aa;font-size:12px;font-weight:600;">Критичность</th>
-              <th align="left" style="padding:8px 12px;border-bottom:1px solid #3f3f46;color:#a1a1aa;font-size:12px;font-weight:600;">Узел</th>
-              <th align="left" style="padding:8px 12px;border-bottom:1px solid #3f3f46;color:#a1a1aa;font-size:12px;font-weight:600;">Находка</th>
-            </tr>
-            {_rows(shown)}
-          </table>
+        <tr><td style="padding:8px 28px 0;color:#fafafa;font-size:14px;font-weight:650;">Находки</td></tr>
+        <tr><td style="padding:10px 28px 0;">
+          {_rows(shown)}
           {more_line}
         </td></tr>"""
+    button = ""
+    if link:
+        button = (
+            '<tr><td style="padding:18px 28px 0;">'
+            f'<a href="{html.escape(link, quote=True)}" '
+            'style="display:inline-block;background:#fafafa;color:#09090b;text-decoration:none;'
+            'font-weight:650;font-size:14px;padding:12px 18px;border-radius:8px;">Перейти в платформу</a>'
+            "</td></tr>"
+        )
     logo = Path(__file__).resolve().parents[1] / "static" / "logo.png"
-    mark = '<img src="cid:brosec-logo" width="64" height="64" alt="" style="display:block;border-radius:16px;border:0;">' if logo.is_file() else ""
-    html_body = f"""<!DOCTYPE html>
-<html lang="ru"><head><meta charset="utf-8"></head><body style="margin:0;padding:0;background:#09090b;color:#fafafa;font-family:Segoe UI,Arial,sans-serif;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#09090b;">
-    <tr><td align="center" style="padding:28px 16px;">
-      <table role="presentation" width="640" cellpadding="0" cellspacing="0" style="width:640px;max-width:640px;background:#18181b;border:1px solid #3f3f46;border-radius:16px;">
-        <tr><td style="height:4px;background:#e879f9;background:linear-gradient(90deg,#e879f9,#22d3ee);font-size:0;line-height:0;">&nbsp;</td></tr>
-        <tr><td style="padding:28px 28px 8px;">
-          <table role="presentation" cellpadding="0" cellspacing="0"><tr>
-            <td style="padding-right:16px;vertical-align:middle;">{mark}</td>
-            <td style="vertical-align:middle;">
-              <div style="color:#e879f9;font-size:11px;letter-spacing:.16em;font-weight:650;">BROSEC AUDIT AD</div>
-              <div style="font-size:22px;font-weight:650;line-height:1.3;padding-top:4px;">{html.escape(title)}</div>
-            </td>
-          </tr></table>
-        </td></tr>
-        <tr><td style="padding:8px 28px 0;color:#a1a1aa;font-size:14px;">{html.escape(company_name)}</td></tr>
-        <tr><td style="padding:16px 28px 0;">{_counts(shown) if include_findings else ""}</td></tr>
-        <tr><td style="padding:0 28px;">
-          <div style="background:#09090b;border:1px solid #27272a;border-radius:12px;padding:14px 16px;color:#e4e4e7;font-size:14px;line-height:1.5;white-space:pre-wrap;">{html.escape(summary or "Сводка проверки BroSec Audit AD.")}</div>
-        </td></tr>
-        {findings_block}
-        <tr><td style="padding:8px 28px 24px;color:#71717a;font-size:12px;line-height:1.5;">Пароли, билеты и значения cpassword в письмо не попадают. Закрытие находки выполняется в консоли BroSec Audit AD.</td></tr>
-      </table>
-    </td></tr>
-  </table>
-</body></html>"""
+    html_body = render_html(
+        company_name, summary, findings, title,
+        include_findings=include_findings, app_url=link, logo_available=logo.is_file(),
+    )
     message.add_alternative(html_body, subtype="html")
     if logo.is_file():
         part = message.get_payload()[-1]
@@ -150,17 +205,71 @@ def send_report(
         )
     try:
         if security == "ssl" or (not security and port == 465):
-            smtp_cm = smtplib.SMTP_SSL(server, port, timeout=20)
+            smtp_cm = smtplib.SMTP_SSL(server, port, timeout=20, context=ssl.create_default_context())
         else:
             smtp_cm = smtplib.SMTP(server, port, timeout=20)
         with smtp_cm as smtp:
             smtp.ehlo()
             if security == "starttls" or (not security and port == 587):
-                smtp.starttls()
+                smtp.starttls(context=ssl.create_default_context())
                 smtp.ehlo()
-            if username and password and password != "password":
+            if username and password:
                 smtp.login(username, password)
-            smtp.send_message(message)
+            refused = smtp.send_message(message)
+            if refused:
+                return {"ok": False, "error": "Письмо не отправлено: SMTP отклонил получателя; проверьте адрес и разрешение relay для получателя."}
     except (OSError, smtplib.SMTPException) as exc:
-        return {"ok": False, "error": f"Письмо не отправлено: {exc}"}
+        return _delivery_error(exc)
     return {"ok": True, "error": ""}
+
+
+def _delivery_error(exc: Exception) -> dict[str, str | bool]:
+    """Never expose SMTP replies: they may echo credentials or message data."""
+    if isinstance(exc, ssl.SSLCertVerificationError):
+        reason = "не удалось проверить сертификат TLS; проверьте имя сервера и доверенный центр сертификации"
+    elif isinstance(exc, ssl.SSLError):
+        reason = "ошибка TLS; проверьте режим защиты и порт SMTP"
+    elif isinstance(exc, smtplib.SMTPAuthenticationError):
+        reason = "SMTP отклонил авторизацию; проверьте учетные данные и разрешение SMTP AUTH"
+    elif isinstance(exc, smtplib.SMTPRecipientsRefused):
+        reason = "SMTP отклонил получателя; проверьте адрес и разрешение relay для получателя"
+    elif isinstance(exc, smtplib.SMTPSenderRefused):
+        reason = "SMTP отклонил отправителя; проверьте адрес и права отправки"
+    elif isinstance(exc, smtplib.SMTPDataError):
+        reason = "SMTP отклонил сообщение после команды DATA; проверьте размер вложения, квоту и почтовую политику"
+    elif isinstance(exc, smtplib.SMTPNotSupportedError):
+        reason = "SMTP не поддерживает требуемую команду STARTTLS или AUTH; проверьте настройки сервера"
+    elif isinstance(exc, socket.gaierror):
+        reason = "имя SMTP-сервера не разрешается DNS; проверьте SMTP_SERVER / smtp_server и DNS из контейнера приложения"
+    elif isinstance(exc, (TimeoutError, socket.timeout)):
+        reason = "истекло время ожидания SMTP; проверьте сеть, порт и межсетевой экран"
+    elif isinstance(exc, ConnectionRefusedError):
+        reason = "соединение SMTP отклонено; проверьте сервер и порт"
+    elif isinstance(exc, smtplib.SMTPServerDisconnected):
+        reason = "SMTP разорвал соединение; проверьте порт и режим TLS"
+    elif isinstance(exc, smtplib.SMTPException):
+        reason = "SMTP отклонил сообщение или команду; проверьте политику почтового сервера"
+    elif isinstance(exc, OSError):
+        reason = "ошибка сети или чтения вложения; проверьте доступность SMTP и файла отчета"
+    else:
+        reason = "некорректные параметры письма или SMTP"
+    return {"ok": False, "error": "Письмо не отправлено: " + reason + "."}
+
+
+def send_report(
+    company_name: str,
+    summary: str,
+    findings: list[dict],
+    pdf_path: str | None = None,
+    recipient: str | None = None,
+    channel: dict | None = None,
+    subject: str | None = None,
+    headline: str | None = None,
+    include_findings: bool = True,
+) -> dict[str, str | bool]:
+    # Message headers and attachment reads can fail before opening SMTP too.
+    try:
+        return _send_report(company_name, summary, findings, pdf_path, recipient,
+                            channel, subject, headline, include_findings)
+    except (OSError, smtplib.SMTPException, ValueError, TypeError) as exc:
+        return _delivery_error(exc)

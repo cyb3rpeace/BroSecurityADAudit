@@ -80,6 +80,24 @@ class NotifyChannel(Base):
     prefs = Column(Text, default="")
 
 
+class TenantNotifyChannel(Base):
+    """Изолированные каналы уведомлений выбранной компании."""
+
+    __tablename__ = "tenant_notify_channels"
+
+    id = Column(Integer, ForeignKey("companies.id", ondelete="CASCADE"), primary_key=True)
+    smtp_server = Column(String(255), default="")
+    smtp_port = Column(Integer, default=587)
+    smtp_security = Column(String(16), default="starttls")
+    smtp_user = Column(String(255), default="")
+    smtp_password = Column(String(255), default="")
+    smtp_from = Column(String(255), default="")
+    telegram_token = Column(String(255), default="")
+    telegram_chat = Column(String(64), default="")
+    telegram_proxy = Column(String(128), default="")
+    prefs = Column(Text, default="")
+
+
 class AssistantSettings(Base):
     """Подключение внешней модели для ассистента. Ключ в браузер не отдается."""
 

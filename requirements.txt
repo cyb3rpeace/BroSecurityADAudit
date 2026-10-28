@@ -15,3 +15,7 @@ requests-ntlm>=1.2
 paramiko>=3.5,<4
 ldap3>=2.9,<3
 qrcode>=7.4,<9
+
+cryptography>=43,<47
+
+pyzipper>=0.3.6,<0.4
