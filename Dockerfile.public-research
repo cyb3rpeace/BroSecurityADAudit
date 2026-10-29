@@ -1,0 +1,6 @@
+FROM ad-identity-guard:before-public-research-20261029
+WORKDIR /opt/ad-audit
+COPY app/main.py app/main.py
+COPY app/modules/hunting_ai.py app/modules/hunting_ai.py
+COPY app/modules/hunting_research.py app/modules/hunting_research.py
+COPY frontend-build/dist/ app/spa/
