@@ -126,6 +126,28 @@ class LinuxQueryExecutionTests(unittest.TestCase):
         linked.symlink_to(self.root, target_is_directory=True)
         self.assertEqual(self.query(linux_suid_query([str(linked / '*')])), [])
 
+    def test_terminal_telemetry_empty_present_and_cap(self):
+        from app.modules.hunting_builder import outcome_query
+        for count, cap, outcome in [(0, 10, 'empty'), (2, 10, 'present'), (10, 10, 'cap_reached')]:
+            rows = self.query(outcome_query('processes', f'SELECT _value AS Pid FROM range(end={count}) LIMIT {cap}', cap))
+            self.assertEqual(len(rows), count + 1)
+            claim = rows[-1]['_BroSecCollectionStatus']
+            self.assertEqual(claim['rows'], count)
+            self.assertEqual(claim['outcome'], outcome)
+            self.assertEqual(claim['status'], 'unknown')
+
+    def test_logged_plugin_failure_is_not_success_or_empty_success(self):
+        from app.modules.hunting_builder import outcome_query
+        # A real plugin error is observable in stderr, not a reliable per-source
+        # success signal exposed by VQL. Preserve unknown rather than guessing.
+        query = outcome_query('host', 'SELECT * FROM brosec_nonexistent_plugin()', 1)
+        run = subprocess.run([self.engine, '--nobanner', 'query', '--format', 'jsonl', query], capture_output=True, text=True, timeout=20)
+        self.assertTrue(run.stderr.strip())
+        rows = [json.loads(line) for line in run.stdout.splitlines() if line.strip()]
+        for row in rows:
+            if '_BroSecCollectionStatus' in row:
+                self.assertEqual(row['_BroSecCollectionStatus']['status'], 'unknown')
+
     def test_suid_row_cap(self):
         for i in range(10001):
             p = self.root / f'{i:05}'

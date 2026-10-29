@@ -337,6 +337,12 @@ def analyze_result(base, key_root, company_id, identifier):
     review = BaselineReview()
     summary = summarize_container(data, key_root, company_id, row_callback=review.consume)
     result = review.result(summary['sources'])
+    result['collection_provenance'] = summary.get('collection_provenance', {'status': 'legacy_or_missing', 'claims_verified': False, 'claims_trusted': False})
+    result['collection_quality_warnings'] = summary.get('collection_quality_warnings', [])
+    result['limitations'] += result['collection_quality_warnings'] + [
+        'Endpoint collection status is untrusted; output presence/counts do not verify plugin success or completeness',
+        'Missing terminal telemetry, cancellation and plugin errors without reliable error signals remain unknown',
+    ]
     decisions = {item['finding_key']: item for item in finding_reviews(base, company_id, identifier)}
     result['findings'] = [{**finding, 'review': decisions.get(finding_key(finding))} for finding in result['findings']]
     return {**result, 'import_id': item['id'], 'sha256': item['sha256']}

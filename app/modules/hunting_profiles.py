@@ -57,6 +57,13 @@ def collection_contract(profile):
         'schema': 'brosec.collection-contract.v1',
         'collector_schema': 'brosec.result.v1',
         'capture_clock': 'endpoint_utc',
+        'collection_status': {
+            'version': 1, 'transport': 'source_terminal_row',
+            'marker': '_BroSecCollectionStatus',
+            'measurement': 'bounded_output_only_not_plugin_success',
+            'missing_terminal_status': 'unknown',
+            'claims_verified': False,
+        },
         'configured_source_row_limits': rows,
         'row_budget': profile_row_budget(profile['artifacts']),
         'timeout_seconds': profile['timeout_seconds'],

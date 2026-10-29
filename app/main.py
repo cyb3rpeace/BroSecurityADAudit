@@ -1804,6 +1804,7 @@ class ChatIn(BaseModel):
     finding_id: int | None = None
     history: list[ChatTurn] = Field(default_factory=list, max_length=12)
     hunting_result_id: str | None = Field(default=None, max_length=120)
+    public_research: bool = False
 
 
 class HoneyIn(BaseModel):
@@ -3493,8 +3494,10 @@ def hunting_ai_investigate(payload: ChatIn, user: User = Depends(get_user), db: 
     if not runtime["enabled"]:
         raise HTTPException(status_code=503, detail="AI-ассистент отключен в настройках")
     from app.modules.hunting_ai import ask_hunting, audit_answer_citations
+    from app.modules.hunting_research import research_question
+    research = research_question(payload.message, opt_in=payload.public_research)
     try:
-        answer = ask_hunting(runtime, payload.message, analysis)
+        answer = ask_hunting(runtime, payload.message, analysis, research=research)
     except Exception as exc:
         detail = str(exc)
         if runtime.get("api_key"):
@@ -3506,7 +3509,7 @@ def hunting_ai_investigate(payload: ChatIn, user: User = Depends(get_user), db: 
         "result_id": payload.hunting_result_id,
         "ruleset": analysis["ruleset"],
         "assessment_scope": "bounded_tenant_evidence",
-        "research": {"enabled": False, "reason": "Внешний web-research включается отдельным безопасным контуром allowlist; сырые evidence и секреты не отправляются в поиск."},
+        "research": research,
     }
 
 

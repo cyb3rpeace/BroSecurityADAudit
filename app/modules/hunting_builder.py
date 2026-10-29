@@ -133,6 +133,23 @@ LINUX_QUERIES = {
         '/usr/bin/*', '/usr/sbin/*', '/bin/*', '/sbin/*'])),
 }
 
+def outcome_query(source_id, query, cap):
+    """Terminal output measurement, not plugin success/error inference.
+
+    Materialize only the already capped projection, once. A killed/timed-out
+    query has no terminal row and therefore remains unknown. VQL plugins can
+    log errors while returning zero rows: never label that verified success.
+    """
+    return '''LET BroSecRows <= %s
+SELECT * FROM chain(
+  evidence={SELECT * FROM BroSecRows},
+  telemetry={SELECT dict(version=1, source="%s", status="unknown",
+    outcome=if(condition=len(list=BroSecRows) >= %d, then="cap_reached",
+      else=if(condition=len(list=BroSecRows) = 0, then="empty", else="present")),
+    rows=len(list=BroSecRows), measurement="bounded_output_only") AS _BroSecCollectionStatus
+    FROM scope()})''' % (query, source_id, cap)
+
+
 SUPPORTED = BASE_SUPPORTED | frozenset(PERSISTENCE_QUERIES) | frozenset(LINUX_QUERIES)
 
 def certificate_info(pem: str):
@@ -203,7 +220,10 @@ def compile_config(profile: dict, public_certificate: str):
         'name': artifact_name, 'type': 'CLIENT',
         'description': 'Read-only bounded baseline. Row limits may truncate evidence. Linux skips symlinked parent directories and systemd drop-ins; checks are not atomic against concurrent path replacement.',
         'precondition': "SELECT OS FROM info() WHERE OS = '" + platform + "'",
-        'sources': [{'name': definitions[a][0], 'query': definitions[a][1]} for a in profile['artifacts'] if a in definitions],
+        'sources': [{'name': definitions[a][0], 'query': outcome_query(
+            a, definitions[a][1], collection_contract(profile)['configured_source_row_limits'][a])
+            if platform == 'linux' else definitions[a][1]}
+            for a in profile['artifacts'] if a in definitions],
     }
     builtin_artifacts = {
         'services': 'Windows.System.Services',
@@ -224,11 +244,12 @@ LET Password <= join(array=RandomPassword.A)
 LET CampaignId <= "__CAMPAIGN_ID__"
 LET CaptureStartedUTC <= timestamp(epoch=now())
 LET CollectionContract <= parse_json(data=__CONTRACT__)
-LET Metadata <= dict(CaptureStartedUTC=CaptureStartedUTC, CollectionContract=CollectionContract, EncryptedPass=pk_encrypt(data=Password, public_key=PublicCertificate, scheme="X509"), Scheme="X509", PublicKey=PublicCertificate, CampaignId=CampaignId, CollectorSchema="brosec.result.v1")
+LET CollectionStatus <= parse_json(data=__STATUS__)
+LET Metadata <= dict(CollectionStatus=CollectionStatus, CaptureStartedUTC=CaptureStartedUTC, CollectionContract=CollectionContract, EncryptedPass=pk_encrypt(data=Password, public_key=PublicCertificate, scheme="X509"), Scheme="X509", PublicKey=PublicCertificate, CampaignId=CampaignId, CollectorSchema="brosec.result.v1")
 LET Destination <= format(format="BroSec-%s-%d.zip", args=[Host[0].Hostname, now()])
     SELECT * FROM collect(artifacts=__ARTIFACTS__, args=Parameters, output=Destination,
  password=Password, metadata=Metadata, timeout=Timeout, progress_timeout=120,
- cpu_limit=20, concurrency=1, level=5, format="jsonl")'''.replace('__ARTIFACTS__', collected_artifacts).replace('__CAMPAIGN_ID__', campaign_id).replace('__CONTRACT__', json.dumps(json.dumps(contract, ensure_ascii=False)))
+ cpu_limit=20, concurrency=1, level=5, format="jsonl")'''.replace('__ARTIFACTS__', collected_artifacts).replace('__CAMPAIGN_ID__', campaign_id).replace('__CONTRACT__', json.dumps(json.dumps(contract, ensure_ascii=False))).replace('__STATUS__', json.dumps(json.dumps({'version': 1, 'sources': {a: {'status': 'unknown'} for a in profile['artifacts']}})))
     # Random-password and X509 metadata format follow Velociraptor's offline Collector.
     # No plaintext password is emitted as a result row or embedded in the config.
     collector = {

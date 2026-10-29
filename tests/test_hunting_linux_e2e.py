@@ -178,10 +178,12 @@ class LinuxEndToEndTests(unittest.TestCase):
             analysis = analyze_result(base, keys, tenant, identifier)
             self.assertEqual(analysis['import_id'], identifier)
             self.assertEqual(analysis['sha256'], saved['sha256'])
-            # Current analyzer has no Linux persistence rules: collection success
-            # must never be reported as attack detection or a clean-host verdict.
-            linux_sources = {labels[name]['source'] for name in ('LinuxServices.json', 'LinuxCrontab.json', 'LinuxSUID.json')}
-            self.assertTrue(linux_sources.issubset(set(analysis['unsupported_sources'])))
+            # Linux config triage is partial; SUID remains unsupported. Neither
+            # output telemetry nor rule coverage establishes a clean-host verdict.
+            linux_sources = {labels['LinuxSUID.json']['source']}
+            self.assertEqual(linux_sources, set(analysis['unsupported_sources']))
+            self.assertFalse(analysis['collection_provenance']['claims_verified'])
+            self.assertEqual(analysis['collection_provenance'], summary['collection_provenance'])
             self.assertEqual(analysis['verdict'], 'not_determined')
 
             # Retrieve *every* observed source through the real evidence API.

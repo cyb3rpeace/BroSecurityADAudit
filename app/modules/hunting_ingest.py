@@ -34,7 +34,19 @@ def checked_members(archive):
     return {m.filename: m for m in members}
 
 
-def collection_provenance(metadata, sources):
+STATUS_MARKER = '_BroSecCollectionStatus'
+
+
+def strict_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError('Duplicate JSON field')
+        result[key] = value
+    return result
+
+
+def collection_provenance(metadata, sources, terminal_claims=None):
     """Assess observed archive sources and optional untrusted endpoint claims.
 
     Optional metadata CollectionStatus schema (claims only, never verified):
@@ -109,10 +121,42 @@ def collection_provenance(metadata, sources):
             if source_id not in known or not isinstance(claim, dict) or source_id in claims:
                 continue
             status = claim.get('status')
-            if isinstance(status, str) and status in {'failed', 'blocked', 'truncated', 'empty', 'success', 'skipped'}:
+            if isinstance(status, str) and status in {'unknown', 'failed', 'blocked', 'truncated', 'empty', 'success', 'skipped'}:
                 claims[source_id] = status
     for item in requested:
-        item['claimed_status'] = claims.get(item['id'])
+        sid = item['id']
+        item['claimed_status'] = claims.get(sid)
+        item['claimed_outcome'] = 'unknown'
+        item['claim_discrepancies'] = []
+        terminal = (terminal_claims or {}).get(sid, [])
+        if terminal:
+            claim = terminal[0] if len(terminal) == 1 else None
+            valid = (isinstance(claim, dict) and type(claim.get('version')) is int
+                     and claim['version'] == 1 and claim.get('source') == sid
+                     and claim.get('status') == 'unknown'
+                     and claim.get('measurement') == 'bounded_output_only'
+                     and type(claim.get('rows')) is int and 0 <= claim['rows'] <= MAX_ROWS
+                     and isinstance(claim.get('outcome'), str)
+                     and claim['outcome'] in {'present', 'empty', 'cap_reached'})
+            if valid:
+                item['claimed_outcome'] = claim['outcome']
+                item['claimed_rows'] = claim['rows']
+                item['claimed_status'] = 'unknown'
+                expected = ('cap_reached' if claim['rows'] >= item['configured_row_limit']
+                            else 'empty' if claim['rows'] == 0 else 'present')
+                if claim['rows'] != item['observed_rows'] or claim['outcome'] != expected:
+                    item['claim_discrepancies'].append('endpoint_output_count_or_outcome_mismatch')
+            else:
+                item['claim_discrepancies'].append('invalid_or_duplicate_terminal_claim')
+        status = item['claimed_status']
+        if ((status == 'success' and (item['observed_status'] != 'present' or item['limit_reached']))
+                or (status == 'empty' and item['observed_status'] != 'empty')
+                or (status in {'failed', 'blocked', 'skipped'} and item['observed_rows'] > 0)):
+            item['claim_discrepancies'].append('endpoint_status_conflicts_with_archive')
+        if status in {'failed', 'blocked', 'skipped', 'truncated'}:
+            warnings.append(f'{sid}: endpoint claims {status}; unverified collection limitation')
+        for discrepancy in item['claim_discrepancies']:
+            warnings.append(f'{sid}: {discrepancy}; claims do not verify collection success')
     capture = metadata.get('CaptureStartedUTC') if isinstance(metadata, dict) else None
     if not isinstance(capture, str) or len(capture) > 80 or any(ord(c) < 32 for c in capture):
         capture = None
@@ -155,7 +199,7 @@ def summarize_container(data: bytes | Path, key_root: Path, company_id: int, row
                 raise ValueError('data.zip должен быть зашифрован')
             if members['metadata.json'].file_size > 65536:
                 raise ValueError('Слишком большой metadata.json')
-            metadata = json.loads(outer.read('metadata.json'))
+            metadata = json.loads(outer.read('metadata.json'), object_pairs_hook=strict_object)
             if isinstance(metadata, list) and len(metadata) == 1:
                 metadata = metadata[0]
             if not isinstance(metadata, dict):
@@ -171,7 +215,7 @@ def summarize_container(data: bytes | Path, key_root: Path, company_id: int, row
             password = key.decrypt(encrypted, padding.OAEP(mgf=padding.MGF1(hashes.SHA512()), algorithm=hashes.SHA512(), label=None))
             outer.setpassword(password)
             inner_data = outer.read('data.zip')
-        results = []; total = 0; hostnames = set()
+        results = []; total = 0; hostnames = set(); terminal_claims = {}; telemetry_rows = 0
         with pyzipper.AESZipFile(io.BytesIO(inner_data)) as inner:
             members = checked_members(inner)
             inner.setpassword(password)
@@ -194,6 +238,26 @@ def summarize_container(data: bytes | Path, key_root: Path, company_id: int, row
                                 row = json.loads(line)
                                 if not isinstance(row, dict):
                                     raise ValueError('Ожидаются JSON-объекты результатов')
+                                status_contract = metadata.get('CollectionContract', {})
+                                status_contract = status_contract.get('collection_status', {}) if isinstance(status_contract, dict) else {}
+                                if (STATUS_MARKER in row and isinstance(status_contract, dict)
+                                        and type(status_contract.get('version')) is int
+                                        and status_contract.get('version') == 1
+                                        and status_contract.get('marker') == STATUS_MARKER):
+                                    # Duplicate fields in status rows must not be last-wins.
+                                    row = json.loads(line, object_pairs_hook=strict_object)
+                                    from urllib.parse import unquote
+                                    labels = {'Host': 'host', 'Processes': 'processes', 'Network': 'network',
+                                              'Services': 'services', 'Tasks': 'tasks', 'Startup': 'startup',
+                                              'LinuxServices': 'linux_services', 'LinuxCrontab': 'linux_crontab', 'LinuxSUID': 'linux_suid'}
+                                    sid = labels.get(unquote(name).rsplit('/', 1)[-1][:-5])
+                                    telemetry_rows += 1
+                                    if telemetry_rows > 100:
+                                        raise ValueError('Too many collection status rows')
+                                    if sid:
+                                        terminal_claims.setdefault(sid, []).append(
+                                            row[STATUS_MARKER] if len(row) == 1 else None)
+                                    continue
                                 if row_callback is not None:
                                     row_callback(name, count, row)
                                 for key in ('Hostname', 'Host', 'Fqdn'):
@@ -212,7 +276,7 @@ def summarize_container(data: bytes | Path, key_root: Path, company_id: int, row
                                     'completeness': 'unknown'})
         if not results:
             raise ValueError('В контейнере нет JSONL-результатов')
-        provenance = collection_provenance(metadata, results)
+        provenance = collection_provenance(metadata, results, terminal_claims)
         return {'status': 'parsed', 'sources': results, 'total_rows': total,
                 'campaign_id': campaign_id,
                 'collector_schema': metadata.get('CollectorSchema', 'legacy'),

@@ -180,6 +180,10 @@ class LinuxPackagedAcceptanceTests(unittest.TestCase):
             self.assertEqual(set(requested), set(profile['artifacts']))
             for source in requested.values():
                 self.assertEqual(source['observed_status'], 'present')
+                self.assertEqual(source['claimed_status'], 'unknown')
+                self.assertEqual(source['claimed_rows'], source['observed_rows'])
+                self.assertEqual(source['claimed_outcome'], 'cap_reached' if source['limit_reached'] else 'present')
+                self.assertEqual(source['claim_discrepancies'], [])
                 self.assertEqual(source['observed_bytes_status'], 'present')
                 self.assertGreater(source['observed_bytes'], 0)
                 self.assertEqual(source['limit_reached'],
