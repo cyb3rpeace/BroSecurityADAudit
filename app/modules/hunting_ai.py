@@ -216,4 +216,7 @@ def ask_hunting(runtime: dict[str, Any], question: str, analysis: dict[str, Any]
             "не добавляй новые источники или строки. Сохрани разделы и фактическую осторожность."
         )
         answer = complete(payload["messages"] + [{"role": "assistant", "content": answer}, {"role": "user", "content": correction}])
+        citation_audit = audit_answer_citations(answer, analysis)
+        if citation_audit["status"] == "invalid_references":
+            raise RuntimeError("AI вернул недопустимые evidence-ссылки после повторной проверки; заключение отклонено")
     return answer

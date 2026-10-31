@@ -60,6 +60,7 @@ def collection_provenance(metadata, sources, terminal_claims=None):
              'services': 'Services', 'tasks': 'Tasks', 'startup': 'Startup',
              'linux_services': 'LinuxServices', 'linux_crontab': 'LinuxCrontab',
              'linux_suid': 'LinuxSUID'}
+    singleton_sources = {'host'}
     warnings = []
     contract = metadata.get('CollectionContract') if isinstance(metadata, dict) else None
     if not isinstance(contract, dict):
@@ -101,7 +102,7 @@ def collection_provenance(metadata, sources, terminal_claims=None):
             observation = observed_by_id.get(key, {'rows': 0, 'bytes': 0, 'bytes_known': True})
             rows = observation['rows']
             observed_status = 'missing' if key not in observed_by_id else ('empty' if rows == 0 else 'present')
-            possibly_truncated = rows >= cap
+            possibly_truncated = rows >= cap and key not in singleton_sources
             requested.append({'id': key, 'configured_row_limit': cap,
                               'observed_rows': rows,
                               'observed_bytes': observation['bytes'] if observation['bytes_known'] else None,
@@ -142,7 +143,7 @@ def collection_provenance(metadata, sources, terminal_claims=None):
                 item['claimed_outcome'] = claim['outcome']
                 item['claimed_rows'] = claim['rows']
                 item['claimed_status'] = 'unknown'
-                expected = ('cap_reached' if claim['rows'] >= item['configured_row_limit']
+                expected = ('cap_reached' if claim['rows'] >= item['configured_row_limit'] and sid not in singleton_sources
                             else 'empty' if claim['rows'] == 0 else 'present')
                 if claim['rows'] != item['observed_rows'] or claim['outcome'] != expected:
                     item['claim_discrepancies'].append('endpoint_output_count_or_outcome_mismatch')

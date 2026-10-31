@@ -229,7 +229,7 @@ def compile_config(profile: dict, public_certificate: str):
         'description': 'Read-only bounded baseline. Row limits may truncate evidence. Linux skips symlinked parent directories and systemd drop-ins; checks are not atomic against concurrent path replacement.',
         'precondition': "SELECT OS FROM info() WHERE OS = '" + platform + "'",
         'sources': [{'name': definitions[a][0], 'query': outcome_query(
-            a, definitions[a][1], collection_contract(profile)['configured_source_row_limits'][a])
+            a, definitions[a][1], 2 if a == 'host' else collection_contract(profile)['configured_source_row_limits'][a])
             if platform == 'linux' else definitions[a][1]}
             for a in profile['artifacts'] if a in definitions],
     }

@@ -67,10 +67,11 @@ class IngestTests(unittest.TestCase):
                    {'source': 'results/BroSec.Offline.Baseline%2FProcesses.json', 'rows': 0, 'bytes': 0}]
         result = collection_provenance(metadata, sources)
         self.assertFalse(result['claims_verified'])
-        self.assertEqual(result['completeness'], 'possibly_truncated')
+        self.assertEqual(result['completeness'], 'unknown')
         self.assertEqual([r['observed_status'] for r in result['requested_sources']], ['present', 'empty', 'missing'])
         self.assertEqual([r['status'] for r in result['requested_sources']], ['present', 'empty', 'missing'])
-        self.assertTrue(result['requested_sources'][0]['limit_reached'])
+        self.assertFalse(result['requested_sources'][0]['limit_reached'])
+        self.assertEqual(result['requested_sources'][0]['completeness'], 'unknown')
         self.assertEqual(result['requested_sources'][0]['observed_bytes'], 42)
         self.assertEqual(result['requested_sources'][0]['observed_bytes_status'], 'present')
         self.assertEqual(result['requested_sources'][1]['observed_bytes'], 0)

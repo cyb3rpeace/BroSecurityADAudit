@@ -4,9 +4,9 @@
 
 Платформа безопасно собирает проверенные сведения из AD по LDAP/LDAPS и с Windows-хостов по WinRM, выполняет анализ без обязательного AI и показывает только высокоинформативные поведенческие сигналы: обфусцированные и подозрительные команды, аномальные parent-child цепочки, подозрительное persistence и связанные сетевые endpoint. Полный evidence остаётся доступным для проверки, а каждое важное наблюдение привязано к исходной строке.
 
-Проект рассчитан на self-hosted Linux + Docker, поддерживает tenant-изоляцию, SQLite, роли пользователей, отчёты, SMTP/Telegram и подключение внешней AI-модели по API. Текущая версия: **2.6.25**. История изменений: [CHANGELOG.md](CHANGELOG.md).
+Проект рассчитан на self-hosted Linux + Docker, поддерживает tenant-изоляцию, SQLite, роли пользователей, отчёты, SMTP/Telegram и подключение внешней AI-модели по API. Текущая версия: **2.6.25**. Техническая документация проекта: [GitHub Wiki](https://github.com/cyb3rpeace/BroSecurityADAudit/wiki). История изменений: [CHANGELOG.md](CHANGELOG.md).
 
-> **Статус:** production-ready baseline для проверенных сценариев аудита и Threat Hunting. Расширенные Windows Event Log-профили и фактическая доставка уведомлений через конкретный SMTP должны отдельно проверяться в целевой инфраструктуре. Отсутствие сигнала не доказывает отсутствие компрометации.
+> **Статус:** эксплуатационная готовность зависит от проверенной матрицы покрытия и acceptance в целевой инфраструктуре. На этой версии Windows EVTX/WMI/Registry Run/RunOnce остаются candidate и не упаковываются; сборка не должна считаться полной DFIR. Linux-профили ограничены фиксированными источниками и требуют проверки конкретного хоста. Проект не объявляется полностью production-ready для всех расследований до Windows real-engine acceptance, регрессионных испытаний и целевого rollout.
 
 ![Вход, обзор и каталог](docs/tour.gif)
 
@@ -203,6 +203,14 @@ Enable-NetFirewallRule -Name WINRM-HTTP-In-TCP
 ## 🔒 Чего в репозитории нет
 
 Результатов сканирования, базы, сертификатов, паролей домена, токенов почты, Telegram и ключей модели. Не добавляйте их в коммиты.
+
+### Threat Hunting release readiness (2026-10-31)
+
+The reference UI includes workflow guides and a searchable check catalog. Hunting collection provides a shared operator PDF and a tenant-scoped PDF generated from the exact saved profile. These documents describe configured sources and safe execution steps; they do not certify successful collection on a specific endpoint. Review observed source status, missing/empty sources, truncation and scan limitations after import.
+
+The citation audit verifies exact reference membership, not whether the cited row semantically supports the statement. AI responses with invalid references after one correction attempt are rejected. AI output remains advisory and requires analyst verification.
+
+The project publishes source documentation via the GitHub Wiki. Do not mark this release ready for unrestricted incident response until Windows real-engine acceptance for gated sources and platform-specific operational tests are complete.
 
 ### Linux collector coverage update (2026-10-28)
 

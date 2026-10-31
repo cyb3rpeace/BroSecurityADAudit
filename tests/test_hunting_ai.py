@@ -1,4 +1,5 @@
 import unittest
+import pytest
 from app.modules.hunting_ai import prepare_context, public_research, audit_answer_citations
 class AiSafetyTests(unittest.TestCase):
  def test_context_contains_graph_ioc_and_contract(self):
@@ -48,3 +49,24 @@ def test_citation_audit_flags_missing_and_unknown_references():
   assert audit_answer_citations("No refs",analysis)["status"] == "no_verifiable_references"
   result=audit_answer_citations("[evidence:results/Host.json#2]",analysis)
   assert result["status"] == "invalid_references"
+
+
+def test_ask_hunting_rejects_invalid_citation_after_single_retry(monkeypatch):
+  import pytest
+  from app.modules import hunting_ai
+  calls=[]
+  responses=iter([
+    "Повторите [evidence:missing.json#1]",
+    "Повтор снова неверный [evidence:missing.json#1]",
+  ])
+  class Response:
+    def __init__(self, text): self.text=text
+    def raise_for_status(self): pass
+    def json(self): return {"choices":[{"message":{"content":self.text}}]}
+  def post(*args, **kwargs):
+    calls.append(kwargs["json"]["messages"])
+    return Response(next(responses))
+  monkeypatch.setattr(hunting_ai.requests, "post", post)
+  with pytest.raises(RuntimeError, match="после повторной проверки"):
+    hunting_ai.ask_hunting({"api_url":"https://ai.example/v1", "api_key":"test"}, "Проверь", {"findings":[{"source":"results/Host.json", "row_number":1}]})
+  assert len(calls) == 2

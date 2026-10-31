@@ -187,9 +187,7 @@ class LinuxPackagedAcceptanceTests(unittest.TestCase):
                 self.assertEqual(source['observed_bytes_status'], 'present')
                 self.assertGreater(source['observed_bytes'], 0)
                 self.assertEqual(source['limit_reached'],
-                                 source['observed_rows'] >= source['configured_row_limit'])
-                # Host's intentional one-row cap is reached on every collection;
-                # provenance conservatively calls even that possibly truncated.
+                                 source['id'] != 'host' and source['observed_rows'] >= source['configured_row_limit'])
                 if source['id'] != 'host':
                     self.assertFalse(source['limit_reached'])
 
@@ -214,21 +212,22 @@ class LinuxPackagedAcceptanceTests(unittest.TestCase):
             self.assertEqual(analysis['import_id'], identifier)
             self.assertEqual(analysis['sha256'], saved['sha256'])
             # Source support is partial literal triage, not execution proof.
-            linux_sources = {labels[name]['source'] for name in ('LinuxServices.json', 'LinuxCrontab.json', 'LinuxSUID.json')}
-            unsupported_linux = {labels['LinuxSUID.json']['source']}
+            unsupported_linux = set()
             self.assertEqual(set(analysis['unsupported_sources']), unsupported_linux)
             self.assertEqual(analysis['verdict'], 'not_determined')
+            suid_findings = [finding for finding in analysis['findings'] if finding['rule_id'] == 'inventory.linux_suid_sgid']
+            self.assertTrue(suid_findings)
+            self.assertTrue(all(finding['triage_level'] == 'low' for finding in suid_findings))
             self.assertEqual(analysis['missing_sources'], [])
             coverage = {x['source']: x for x in analysis['source_coverage']}
             self.assertEqual(set(coverage), set(observed))
             for label, item in labels.items():
-                self.assertEqual(coverage[item['source']]['supported'], label != 'LinuxSUID.json')
+                self.assertTrue(coverage[item['source']]['supported'])
                 self.assertEqual(coverage[item['source']]['rows'], item['rows'])
-                if label != 'LinuxSUID.json':
-                    self.assertEqual(analysis['rows_reviewed'][label[:-5]], item['rows'])
+                self.assertEqual(analysis['rows_reviewed'][label[:-5]], item['rows'])
             explicit_limits = [
                 'Linux analysis is literal snapshot config triage, not execution history, enablement or maliciousness attribution',
-                'LinuxSUID remains unsupported for threat analysis: mode/owner presence alone is not a strong signal',
+                'LinuxSUID is metadata-only inventory; a special permission bit alone does not prove abuse or compromise',
                 'Linux shell analysis is a narrow invocation subset; compound scripts, substitutions, aliases, includes and environment resolution are unsupported',
                 'Systemd effective configuration, drop-ins, timers, generators, dependencies and overridden vendor units are not resolved',
                 'LinuxServices and LinuxCrontab support is partial: literal commands only; unsupported syntax is not a clean bill of health',
@@ -274,7 +273,11 @@ class LinuxPackagedAcceptanceTests(unittest.TestCase):
                 detected.append(finding)
             self.assertEqual(len([f for f in analysis['findings'] if f['rule_id'].startswith('persistence.linux_')]), 2)
             benign_paths = {'/etc/cron.d/hunting-linux-e2e', '/etc/systemd/system/hunting-linux-e2e.service', '/usr/sbin/hunting-linux-e2e-suid'}
-            self.assertFalse(any(f['evidence'].get('OSPath') in benign_paths for f in analysis['findings']))
+            benign_findings = [f for f in analysis['findings'] if f['evidence'].get('OSPath') in benign_paths]
+            self.assertEqual([f['rule_id'] for f in benign_findings], ['inventory.linux_suid_sgid'])
+            self.assertEqual(benign_findings[0]['triage_level'], 'low')
+            self.assertEqual(benign_findings[0]['assessment'], 'observation')
+            self.assertFalse(any(f['evidence'].get('OSPath') in benign_paths - {'/usr/sbin/hunting-linux-e2e-suid'} for f in analysis['findings']))
             self.assertTrue(analysis['triage_summary']['manual_review_required'])
             self.assertEqual(analysis['triage_summary']['correlations']['process_persistence'], 0)
             self.assertTrue(any('Host, Processes, Network, Services, Tasks' in x for x in analysis['limitations']))

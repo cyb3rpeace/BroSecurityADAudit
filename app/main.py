@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import html
 import json
 import logging
 import os
@@ -3610,6 +3609,49 @@ def hunting_store() -> Path:
     return BASE_DIR / "data" / "threat-hunting"
 
 
+@app.get("/api/threat-hunting/manual.pdf")
+def hunting_manual_pdf(user: User = Depends(get_user)):
+    """Download shared deployment and evidence-handling instructions."""
+    from io import BytesIO
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_LEFT
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+
+    output = BytesIO()
+    document = SimpleDocTemplate(output, pagesize=A4, rightMargin=18*mm, leftMargin=18*mm,
+                                 topMargin=18*mm, bottomMargin=18*mm, title="BroSec Threat Hunting · руководство по сбору")
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(name="ManualTitle", parent=styles["Title"], alignment=TA_LEFT, textColor=colors.HexColor("#152c3b"), spaceAfter=8))
+    styles.add(ParagraphStyle(name="ManualSection", parent=styles["Heading2"], textColor=colors.HexColor("#176b62"), spaceBefore=12, spaceAfter=5))
+    styles.add(ParagraphStyle(name="ManualBody", parent=styles["BodyText"], leading=14, spaceAfter=6))
+    story = [Paragraph("BroSec Threat Hunting", styles["ManualTitle"]),
+             Paragraph("Руководство администратора · сбор, передача и проверка evidence", styles["Heading2"]),
+             Paragraph("Документ описывает безопасную процедуру для поддержанных профилей. Он не подтверждает полноту сбора и не включает неподтверждённые Windows candidate источники.", styles["ManualBody"])]
+    sections = [
+      ("1. Подготовка", ["Подтвердите полномочия, владельца хоста, область, срок хранения и окно работ. Проверьте свободное место, совместимость ОС/архитектуры и локальные требования EDR.", "Начните с одного некритичного хоста и минимального профиля. Сверьте collection coverage и оставьте candidate/unsupported источники выключенными."]),
+      ("2. Создание и запуск профиля", ["Создайте отдельный профиль Windows или Linux в tenant компании. Выдайте пакет из интерфейса и сохраните его manifest.", "Проверьте SHA-256 collector по manifest до запуска. Храните package в каталоге, изменяемом только администраторами/root. Не меняйте встроенный профиль и не добавляйте неизвестные CLI-флаги.", "Windows: используйте повышенную согласованную сессию; Linux: разрешённый root/sudo. Соблюдайте timeout и контролируйте нагрузку хоста."]),
+      ("3. Доставка по группе", ["Сначала проверьте ручной запуск на одном хосте. Затем запускайте маленькие утверждённые группы с лимитом параллелизма.", "Для GPO разделяйте read-only источник бинарника и индивидуальные каталоги результата по машинным учётным записям. Для Ansible ограничьте inventory, используйте SSH host key checking и закрытые каталоги на контроллере.", "Массовый запуск может повлиять на CPU, диск, сеть и загрузку ОС. Остановите волну при ошибках или деградации."]),
+      ("4. Проверка и импорт", ["Убедитесь, что collector завершился успешно, создан один оригинальный зашифрованный ZIP и зафиксирован SHA-256. Не распаковывайте и не переупаковывайте evidence.", "Передавайте ZIP по утверждённому защищённому каналу и импортируйте в правильный tenant. После импорта проверьте hostname, фактически наблюдаемые sources, terminal status и лимиты.", "Отсутствующая, пустая или усечённая таблица не доказывает отсутствия события. Сопоставляйте archive с журналом исполнения и сохранённой цепочкой хранения."]),
+      ("5. Область доказательств", ["Processes и Network являются снимками; они не заменяют исторические журналы. Лимит rows ограничивает вывод query, не гарантирует ограничение всех затрат scan.", "Linux cron/systemd/SUID источники ограничены фиксированными путями, максимальным числом файлов/строк и размером содержимого согласно каталогу.", "Windows EVTX, WMI persistence, Registry Run/RunOnce и Accounts остаются candidate до реального Windows execution acceptance. Не представляйте их как собранные.", "Модуль не выполняет полный диск-образ, память/RAM acquisition, NTDS acquisition или автоматическую ремедиацию."]),
+      ("6. Защита и хранение", ["Не передавайте внешний AI чувствительные данные без утверждённой политики API/retention. Не публикуйте расшифровочные ключи, ZIP, журналы или manifest, содержащий внутренние сведения.", "Сохраняйте резервные копии tenant-ключей и доказательств по утверждённой процедуре. Удаляйте временные копии только после сверки retention и завершения расследования."])
+    ]
+    esc = lambda value: html.escape(str(value))
+    for heading, paragraphs in sections:
+        story.append(Paragraph(esc(heading), styles["ManualSection"]))
+        story.extend(Paragraph(esc(text), styles["ManualBody"]) for text in paragraphs)
+    story.extend([Spacer(1, 5), Paragraph("Быстрая контрольная проверка", styles["ManualSection"])])
+    rows = [["Этап", "Условие продолжения"], ["До запуска", "Разрешение · scope · место · совместимый хост"], ["До передачи", "SHA-256 совпал · ACL проверен · один результат"], ["После импорта", "Tenant · host · источники · статус · усечение"], ["До вывода", "Проверены исходные строки и альтернативные объяснения"]]
+    table = Table([[Paragraph(esc(cell), styles["BodyText"]) for cell in row] for row in rows], colWidths=[45*mm, 128*mm], repeatRows=1)
+    table.setStyle(TableStyle([("BACKGROUND", (0,0), (-1,0), colors.HexColor("#e8f0ef")), ("GRID", (0,0), (-1,-1), 0.35, colors.HexColor("#c7d2d3")), ("VALIGN", (0,0), (-1,-1), "TOP"), ("LEFTPADDING", (0,0), (-1,-1), 6), ("RIGHTPADDING", (0,0), (-1,-1), 6), ("TOPPADDING", (0,0), (-1,-1), 6), ("BOTTOMPADDING", (0,0), (-1,-1), 6)]))
+    story.append(table)
+    document.build(story)
+    return Response(output.getvalue(), media_type="application/pdf",
+                    headers={"Content-Disposition": 'attachment; filename="brosec-threat-hunting-collection-guide.pdf"', "Cache-Control": "no-store"})
+
+
 @app.get("/api/threat-hunting/catalog")
 def hunting_catalog(user: User = Depends(get_user)):
     from app.modules.hunting_runtime import capabilities
@@ -4211,6 +4253,76 @@ def hunting_compile(profile_id: str, payload: HuntingConfigIn, user: User = Depe
     write_audit(db, user, "hunting_config_compile", f"profile={row['id']}; config_sha256={manifest['config_sha256']}", company.id)
     db.commit()
     return JSONResponse({"config": json.loads(data), "config_text": data.decode("utf-8"), "manifest": manifest}, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/threat-hunting/profiles/{profile_id}/guide.pdf")
+def hunting_profile_guide(profile_id: str, company_id: int, user: User = Depends(get_user), db: Session = Depends(get_db)):
+    """Render an operator PDF from the tenant-scoped saved artifact contract."""
+    import html
+    from io import BytesIO
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_LEFT
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, KeepTogether
+
+    company = resolve_company(user, db, company_id)
+    profile = hunting_profiles.get_profile(hunting_store(), company.id, profile_id)
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Профиль не найден")
+
+    catalog = {item["id"]: item for item in hunting_profiles.CATALOG}
+    artifacts = [catalog[item] for item in profile["artifacts"] if item in catalog]
+    if len(artifacts) != len(profile["artifacts"]):
+        raise HTTPException(status_code=409, detail="Профиль содержит неизвестный источник")
+    output = BytesIO()
+    document = SimpleDocTemplate(output, pagesize=A4, rightMargin=18*mm, leftMargin=18*mm,
+                                 topMargin=18*mm, bottomMargin=18*mm, title="BroSec Threat Hunting · инструкция")
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(name="BroSecTitle", parent=styles["Title"], alignment=TA_LEFT, textColor=colors.HexColor("#152c3b"), spaceAfter=8))
+    styles.add(ParagraphStyle(name="BroSecSection", parent=styles["Heading2"], textColor=colors.HexColor("#176b62"), spaceBefore=10, spaceAfter=5))
+    styles.add(ParagraphStyle(name="BroSecBody", parent=styles["BodyText"], leading=14, spaceAfter=5))
+    esc = lambda value: html.escape(str(value)).replace("\n", "<br/>")
+    story = [Paragraph("BroSec Threat Hunting", styles["BroSecTitle"]),
+             Paragraph("Инструкция по сбору артефактов · версия профиля", styles["Heading2"]),
+             Paragraph(f"Профиль: <b>{esc(profile['name'])}</b> · ОС: <b>{esc(profile['platform'])}</b>", styles["BroSecBody"]),
+             Paragraph(f"Источников: {len(artifacts)} · timeout: {profile['timeout_seconds']} секунд · лимит результата профиля: до 90 000 строк по контракту", styles["BroSecBody"]),
+             Paragraph("Перед началом", styles["BroSecSection"]),
+             Paragraph("Получите разрешение владельца хоста, согласуйте окно, объём данных, привилегии, хранение и канал передачи. Сначала выполните пилот на одном некритичном узле. Не отключайте EDR и не запускайте неподтверждённые candidate-источники.", styles["BroSecBody"]),
+             Paragraph("Порядок выполнения", styles["BroSecSection"])]
+    steps = [
+        "Скачайте ZIP именно этого tenant-профиля из авторизованного интерфейса. Сохраните manifest.json и зафиксируйте SHA-256 из доверенного канала.",
+        "Распакуйте пакет в каталог, где изменение разрешено только администраторам или root. Проверьте SHA-256 исполняемого файла по manifest до запуска.",
+        "Windows: запустите пакет в согласованной административной сессии. Linux: используйте совместимый Linux-пакет и утверждённый sudo/root-доступ. Встроенный collector запускается без дополнительных CLI-флагов.",
+        "Защитите каталог результата ACL/правами доступа. Не помещайте пароль, приватный ключ или секреты в скрипт, командную строку или общий каталог.",
+        "Убедитесь в успешном коде завершения, наличии одного зашифрованного BroSec-*.zip и сохраните его SHA-256. Передавайте оригинальный архив по утверждённому каналу и импортируйте его в правильную компанию.",
+        "После импорта сравните host, перечень источников, статусы завершения, лимиты/усечение и ошибки. Не трактуйте отсутствующий или пустой источник как доказательство отсутствия активности."
+    ]
+    story.extend(Paragraph(f"{index}. {esc(text)}", styles["BroSecBody"]) for index, text in enumerate(steps, 1))
+    story.append(Paragraph("Источники профиля", styles["BroSecSection"]))
+    rows = [[Paragraph("Артефакт", styles["BodyText"]), Paragraph("Источник / статус", styles["BodyText"]), Paragraph("Область и ограничения", styles["BodyText"])]]
+    for item in artifacts:
+        status = item["status"]
+        rows.append([Paragraph(esc(item["title"]), styles["BodyText"]),
+                     Paragraph(f"{esc(item.get('source', item['id']))}<br/>{esc(status)}", styles["BodyText"]),
+                     Paragraph(esc(item["note"]), styles["BodyText"])])
+    table = Table(rows, colWidths=[38*mm, 37*mm, 98*mm], repeatRows=1, hAlign="LEFT")
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#e8f0ef")),
+        ("GRID", (0,0), (-1,-1), 0.35, colors.HexColor("#c7d2d3")),
+        ("VALIGN", (0,0), (-1,-1), "TOP"),
+        ("LEFTPADDING", (0,0), (-1,-1), 6), ("RIGHTPADDING", (0,0), (-1,-1), 6),
+        ("TOPPADDING", (0,0), (-1,-1), 6), ("BOTTOMPADDING", (0,0), (-1,-1), 6),
+    ]))
+    story.append(table)
+    story.extend([Spacer(1, 8), Paragraph("Границы достоверности", styles["BroSecSection"]),
+        Paragraph("Эта инструкция описывает конфигурацию профиля, а не подтверждает успешное исполнение каждого plugin на конкретном хосте. Проверяйте полученный archive и terminal status. Snapshot процессов/сети не является историей. Ограничения по строкам не ограничивают полностью scan work, байты или время ОС. Детальный обыск диска, RAM acquisition и полный forensic image не выполняются.", styles["BroSecBody"]),
+        Paragraph(f"profile_id: {esc(profile['id'])} · company_id не включён в документ · Сформировано сервером BroSec", styles["BodyText"])])
+    document.build(story)
+    filename = f"brosec-collection-guide-{profile['platform']}-{profile['id']}.pdf"
+    return Response(output.getvalue(), media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"', "Cache-Control": "no-store"})
 
 
 @app.get("/api/threat-hunting/profiles/{profile_id}/spec")

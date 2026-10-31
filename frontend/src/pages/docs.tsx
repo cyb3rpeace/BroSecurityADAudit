@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
+import { BookOpen, ChevronRight, FileText, Search } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { PageHead } from "@/components/bits"
 import type { WikiItem } from "@/lib/types"
@@ -69,87 +68,75 @@ function sevClass(sev: string) {
   return "bg-muted text-muted-foreground"
 }
 
+const DOC_SECTIONS = [
+  { id: "all", label: "Все материалы" },
+  { id: "hunting", label: "Threat Hunting" },
+  { id: "operations", label: "Эксплуатация" },
+  { id: "platform", label: "Проверки платформы" },
+] as const
+
 export function Docs() {
   const { t, lang, setView } = useApp()
   const [items, setItems] = useState<WikiItem[]>([])
   const [query, setQuery] = useState("")
-  const [group, setGroup] = useState("all")
-  const [open, setOpen] = useState<string[]>(["start"])
+  const [group, setGroup] = useState<string>("all")
+  const [selected, setSelected] = useState<string>("hunting-navigation")
   const [card, setCard] = useState<WikiItem | null>(null)
   const [copied, setCopied] = useState("")
 
-  useEffect(() => {
-    void loadWiki().then(setItems)
-  }, [])
+  useEffect(() => { void loadWiki().then(setItems) }, [])
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    const wiki = items.filter((item) => item.g !== "pingcastle" && item.g !== "graph")
-    const ids = new Set(wiki.map((item) => item.id))
-    const articles = [...KNOWLEDGE, ...HANDBOOK]
-    const extra: WikiItem[] = articles.filter((item) => !ids.has(item.id)).map((item) => ({
-      id: item.id,
-      title: item.title,
-      text: item.what,
-      g: "platform",
-      what: item.what,
-      impact: item.impact,
-      fix: item.defense.join(" "),
-      sev: item.severity,
+  const wiki = useMemo(() => {
+    const base = items.filter(item => item.g !== "pingcastle" && item.g !== "graph")
+    const ids = new Set(base.map(item => item.id))
+    const extra: WikiItem[] = [...KNOWLEDGE, ...HANDBOOK].filter(item => !ids.has(item.id)).map(item => ({
+      id: item.id, title: item.title, text: item.what, g: "platform", what: item.what,
+      impact: item.impact, fix: item.defense.join(" "), sev: item.severity,
     }))
-    return [...wiki, ...extra].filter((item) => (group === "all" || item.g === group) && (!q || [item.id, item.title, item.text, item.family, item.what, item.impact, item.fix].join(" ").toLowerCase().includes(q)))
-  }, [group, items, query])
+    return [...base, ...extra]
+  }, [items])
 
-  const docs = DOCS[lang].filter(row => !query || row.join(" ").toLowerCase().includes(query.toLowerCase()))
+  const articles = useMemo(() => DOCS[lang].map(([id, title, text]) => ({
+    id, title, text, g: id.startsWith("hunting-") ? "hunting" : "operations",
+  })), [lang])
+  const allMaterials = useMemo<Array<{ id: string; title: string; text: string; g: string; kind: "guide" | "check"; family?: string; what?: string; impact?: string; fix?: string; sev?: string }>>(() => [
+    ...articles.map(item => ({ ...item, kind: "guide" as const })),
+    ...wiki.filter((item): item is WikiItem & { id: string } => typeof item.id === "string").map(item => ({ ...item, kind: "check" as const })),
+  ], [articles, wiki])
+  const filtered = useMemo(() => {
+    const q = query.trim().toLocaleLowerCase(lang === "ru" ? "ru" : "en")
+    return allMaterials.filter(item =>
+      (group === "all" || item.g === group) &&
+      (!q || [item.id, item.title, item.text, item.family, item.what, item.impact, item.fix].filter(Boolean).join(" ").toLocaleLowerCase().includes(q))
+    )
+  }, [allMaterials, group, lang, query])
+  const current = filtered.find(item => item.id === selected) || filtered[0]
+  const checks = current?.kind === "check" ? wiki.find(item => item.id === current.id) : undefined
 
-  return (
-    <div>
-      <PageHead title={t("nav.docs")} sub={t("docs.lead")} />
-      <Button className="mb-4" variant="secondary" onClick={() => setView("notes")}>Примечания к обновлению</Button>
-      <div className="mb-4 flex flex-wrap gap-2">
-        <Button variant="outline" onClick={() => setOpen(docs.map((row) => row[0]))}>Развернуть все</Button>
-        <Button variant="outline" onClick={() => setOpen([])}>Свернуть все</Button>
-        <Input className="max-w-sm" value={query} placeholder="Поиск по справочнику: SMB, LDAP, GPO..." onChange={(event) => setQuery(event.target.value)} />
-      </div>
-      <p className="text-muted-foreground mb-4 text-sm">Документация по работе и эксплуатации — в разделах ниже. Поиск также находит проверки платформы: назначение, влияние, исправление и источники.</p>
-      <Accordion type="multiple" value={query ? docs.map(row => row[0]) : open} onValueChange={setOpen} className="mb-6">
-        {docs.map(([id, title, text]) => (
-          <AccordionItem key={id} value={id}>
-            <AccordionTrigger>{title}</AccordionTrigger>
-            <AccordionContent>{text}</AccordionContent>
-          </AccordionItem>
-        ))}
-      </Accordion>
-      <Tabs value={group} onValueChange={setGroup}>
-        <TabsList>
-          <TabsTrigger value="all">{t("all")}</TabsTrigger>
-          <TabsTrigger value="platform">Наши проверки</TabsTrigger>
-        </TabsList>
-      </Tabs>
-      <div className="mt-4 grid gap-2">
-        {query ? <div className="grid gap-2 sm:grid-cols-2">{filtered.map((item) => <WikiCard key={(item.id || "") + item.title} item={item} onOpen={setCard} />)}</div> : (
-          <>
-            {["platform"].filter((key) => group === "all" || group === key).map((key) => (
-              <WikiBlock key={key} title="Проверки платформы" items={filtered.filter((item) => item.g === key)} onOpen={setCard} />
-            ))}
-          </>
-        )}
-        {!filtered.length ? <p className="text-muted-foreground text-sm">В справочнике ничего не найдено.</p> : null}
-      </div>
-      <Dialog open={!!card} onOpenChange={(next) => { if (!next) setCard(null) }}>
-        <DialogContent className="max-h-[85vh] overflow-auto sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle className="flex flex-wrap items-center gap-2">
-              {card?.title}
-              {card?.sev ? <span className={"rounded-full px-2 py-0.5 text-xs " + sevClass(card.sev)}>{SEV[card.sev] || card.sev}</span> : null}
-            </DialogTitle>
-            <DialogDescription>{[card?.id, card?.family].filter(Boolean).join(" · ")}</DialogDescription>
-          </DialogHeader>
-          {card ? <CheckArticle item={card} copied={copied} onCopy={setCopied} /> : null}
-        </DialogContent>
-      </Dialog>
+  return <div className="docs-page space-y-5">
+    <PageHead title={t("nav.docs")} sub="Техническая документация, эксплуатационные процедуры и каталог проверок" />
+    <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-4">
+      <div className="flex items-center gap-2 text-sm text-muted-foreground"><BookOpen className="size-4" aria-hidden="true" /><span>Документация платформы</span><ChevronRight className="size-4" aria-hidden="true" /><span className="text-foreground">Справочник</span></div>
+      <Button variant="outline" onClick={() => setView("notes")}>Примечания к обновлению</Button>
     </div>
-  )
+    <div className="grid gap-5 lg:grid-cols-[230px_minmax(0,1fr)] xl:grid-cols-[250px_minmax(0,1fr)_280px]">
+      <aside className="docs-sidebar space-y-4 lg:sticky lg:top-4 lg:max-h-[calc(100svh-2rem)] lg:overflow-auto">
+        <label className="relative block"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" /><Input className="pl-9" aria-label="Поиск документации" value={query} placeholder="Поиск по документации" onChange={event => setQuery(event.target.value)} /></label>
+        <nav aria-label="Разделы документации" className="grid gap-1 sm:grid-cols-2 lg:grid-cols-1">
+          {DOC_SECTIONS.map(section => <button key={section.id} type="button" onClick={() => { setGroup(section.id); setSelected(filtered.find(item => section.id === "all" || item.g === section.id)?.id || "") }} aria-current={group === section.id ? "page" : undefined} className={`min-h-10 rounded-md px-3 py-2 text-left text-sm ${group === section.id ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}>{section.label}</button>)}
+        </nav>
+        <div className="border-t pt-3"><p className="mb-2 px-2 text-xs font-semibold uppercase text-muted-foreground">Материалы · {filtered.length}</p><div className="grid gap-1" role="listbox" aria-label="Материалы документации">{filtered.map(item => <button key={`${item.kind}-${item.id}`} type="button" role="option" aria-selected={current?.id === item.id} onClick={() => setSelected(item.id)} className={`min-h-10 rounded-md px-3 py-2 text-left text-sm ${current?.id === item.id ? "bg-muted font-medium text-foreground" : "text-muted-foreground hover:bg-muted/70 hover:text-foreground"}`}><span className="flex items-start gap-2"><FileText className="mt-0.5 size-4 shrink-0" aria-hidden="true" /><span className="min-w-0 break-words">{item.title}</span></span></button>)}{!filtered.length && <p className="px-3 py-4 text-sm text-muted-foreground">Материалы не найдены.</p>}</div></div>
+      </aside>
+      <main className="min-w-0" aria-live="polite">
+        {current ? <article className="min-w-0 space-y-5">
+          <header className="border-b pb-5"><p className="text-xs font-medium uppercase text-muted-foreground">{current.kind === "guide" ? (current.g === "hunting" ? "Threat Hunting · руководство" : "Эксплуатация · руководство") : "Каталог проверок"}</p><h1 className="mt-2 break-words text-2xl font-semibold">{current.title}</h1><p className="mt-3 max-w-3xl text-sm leading-6 text-muted-foreground">{current.text}</p>{checks?.sev && <span className={`mt-3 inline-flex rounded-sm px-2 py-1 text-xs ${sevClass(checks.sev)}`}>{SEV[checks.sev] || checks.sev}</span>}</header>
+          {current.kind === "guide" ? <div className="grid gap-5 text-sm leading-7"><section><h2 className="mb-2 text-base font-semibold">Процедура и область применения</h2><p className="max-w-4xl whitespace-pre-line text-muted-foreground">{current.text}</p></section>{current.id.startsWith("hunting-") && <div className="rounded-md border-l-2 border-primary bg-muted/40 p-4 text-sm"><strong>Правило работы с evidence</strong><p className="mt-1 text-muted-foreground">Проверяйте исходный архив, источник и номер строки. Различайте факт, гипотезу и пробел; конфигурация и эвристика не подтверждают выполнение или компрометацию.</p></div>}</div> : checks ? <CheckArticle item={checks} copied={copied} onCopy={setCopied} /> : null}
+        </article> : <p className="rounded-md border p-6 text-sm text-muted-foreground">Выберите раздел или уточните поиск.</p>}
+      </main>
+      <aside className="hidden xl:block"><div className="sticky top-4 space-y-3 border-l pl-4 text-sm"><p className="font-semibold">В этом разделе</p><p className="text-muted-foreground">{current?.kind === "guide" ? "Назначение · процедура · ограничения" : "Назначение · техническая детализация · влияние · исправление"}</p>{current?.kind === "check" && <Button className="w-full" variant="outline" onClick={() => setCard(checks || null)}>Открыть карточку проверки</Button>}</div></aside>
+    </div>
+    <Dialog open={!!card} onOpenChange={next => { if (!next) setCard(null) }}><DialogContent className="max-h-[85dvh] overflow-auto sm:max-w-2xl"><DialogHeader><DialogTitle>{card?.title}</DialogTitle><DialogDescription>{[card?.id, card?.family].filter(Boolean).join(" · ")}</DialogDescription></DialogHeader>{card && <CheckArticle item={card} copied={copied} onCopy={setCopied} />}</DialogContent></Dialog>
+  </div>
 }
 
 function CheckArticle({ item, copied, onCopy }: { item: WikiItem; copied: string; onCopy: (id: string) => void }) {
@@ -179,34 +166,5 @@ function CheckArticle({ item, copied, onCopy }: { item: WikiItem; copied: string
         {links.map((link) => <a key={link.href} className="text-primary underline" href={link.href} target="_blank" rel="noreferrer">{link.title}</a>)}
       </section>
     </div>
-  )
-}
-
-function WikiBlock({ title, items, onOpen }: { title: string; items: WikiItem[]; onOpen: (item: WikiItem) => void }) {
-  if (!items.length) return null
-  return (
-    <Accordion type="single" collapsible>
-      <AccordionItem value={title}>
-        <AccordionTrigger>{title} · {items.length}</AccordionTrigger>
-        <AccordionContent>
-          <div className="grid gap-2 sm:grid-cols-2">
-            {items.map((item) => <WikiCard key={(item.id || "") + item.title} item={item} onOpen={onOpen} />)}
-          </div>
-        </AccordionContent>
-      </AccordionItem>
-    </Accordion>
-  )
-}
-
-function WikiCard({ item, onOpen }: { item: WikiItem; onOpen: (item: WikiItem) => void }) {
-  return (
-    <button type="button" className="hover:bg-muted/60 rounded-xl border p-3 text-left" onClick={() => onOpen(item)}>
-      <div className="flex items-center justify-between gap-2">
-        <code className="text-muted-foreground text-xs">{item.id}</code>
-        {item.sev ? <span className={"rounded-full px-2 py-0.5 text-[11px] " + sevClass(item.sev)}>{SEV[item.sev] || item.sev}</span> : null}
-      </div>
-      <div className="font-medium">{item.title}</div>
-      <p className="text-muted-foreground line-clamp-2 text-xs">{item.impact || item.text}</p>
-    </button>
   )
 }

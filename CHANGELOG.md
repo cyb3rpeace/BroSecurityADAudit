@@ -1,3 +1,12 @@
+## 2.6.26 — Threat Hunting UX and collection guides (2026-10-31)
+
+- Reworked the in-app reference into a responsive technical documentation workspace with category navigation, searchable content, and focused article reading.
+- Added a tenant-authorized PDF collection guide for each saved collector profile and a shared operator workflow PDF.
+- Improved Threat Hunting workspace navigation, profile controls, investigation result layouts, campaign planning, and dashboard responsiveness.
+- Failed closed when an external AI model repeated invalid evidence references after the single correction attempt.
+- Synchronized the frontend build output to the served SPA asset directory so the Docker image can serve the rebuilt UI.
+- Release readiness remains gated on real Windows collector acceptance for candidate event, WMI, and registry sources; the UI and documentation do not imply those sources are executable.
+
 ## 2.6.25 — 2026-10-28
 
 - Added a shared 90,000-row normalized-source profile budget with a 10,000-row reserve below the importer cap; enforced server-side and shown in the UI. Legacy duplicate built-ins remain outside this guarantee.

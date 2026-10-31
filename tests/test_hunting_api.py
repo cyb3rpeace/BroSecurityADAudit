@@ -7,10 +7,12 @@ import ast
 import tempfile
 import unittest
 from pathlib import Path
+from io import BytesIO
+from pypdf import PdfReader
 from types import SimpleNamespace
 
 from fastapi import FastAPI, Depends, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, Field
 from app.modules import hunting_profiles
@@ -30,11 +32,11 @@ class HuntingApiTests(unittest.TestCase):
         def get_db():
             return self.db
         app = FastAPI()
-        scope = dict(HUNTING_BUILD_LOCK=__import__('threading').BoundedSemaphore(1), json=__import__('json'), app=app, Depends=Depends, HTTPException=HTTPException, JSONResponse=JSONResponse,
+        scope = dict(HUNTING_BUILD_LOCK=__import__('threading').BoundedSemaphore(1), json=__import__('json'), app=app, Depends=Depends, HTTPException=HTTPException, JSONResponse=JSONResponse, Response=Response,
                      Form=__import__('fastapi').Form, File=__import__('fastapi').File, UploadFile=__import__('fastapi').UploadFile, hashlib=__import__('hashlib'), BaseModel=BaseModel, Field=Field, Path=Path, User=object, Session=object, Company=object,
                      get_user=get_user, get_db=get_db, hunting_profiles=hunting_profiles,
                      BASE_DIR=Path(self.tmp.name), write_audit=lambda *args: None)
-        names = {'resolve_company', 'HuntingProfileIn', 'hunting_store', 'hunting_external_worker_enabled', 'hunting_catalog', 'hunting_list', 'hunting_create', 'hunting_spec', 'HuntingConfigIn', 'hunting_compile', 'HuntingBuildIn', 'hunting_package', 'hunting_import', 'hunting_history', 'hunting_result_delete', 'hunting_profile_delete', 'hunting_rows', 'hunting_analysis'}
+        names = {'resolve_company', 'HuntingProfileIn', 'hunting_store', 'hunting_external_worker_enabled', 'hunting_catalog', 'hunting_list', 'hunting_create', 'hunting_spec', 'hunting_profile_guide', 'HuntingConfigIn', 'hunting_compile', 'HuntingBuildIn', 'hunting_package', 'hunting_import', 'hunting_history', 'hunting_result_delete', 'hunting_profile_delete', 'hunting_rows', 'hunting_analysis'}
         source = Path(__file__).resolve().parents[1] / 'app' / 'main.py'
         tree = ast.parse(source.read_text(encoding='utf-8'))
         nodes = [n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.ClassDef)) and n.name in names]
@@ -62,6 +64,19 @@ class HuntingApiTests(unittest.TestCase):
         self.assertEqual(spec.headers['cache-control'], 'no-store')
         self.assertFalse(spec.json()['executable'])
         self.assertNotIn('company_id', spec.json())
+
+    def test_profile_guide_pdf_auth_tenant_and_artifact_scope(self):
+        self.login()
+        row = self.client.post('/api/threat-hunting/profiles', json=self.payload).json()
+        url = '/api/threat-hunting/profiles/' + row['id'] + '/guide.pdf?company_id='
+        self.assertEqual(self.client.get(url + '1').status_code, 200)
+        pdf = self.client.get(url + '1')
+        self.assertEqual(pdf.headers['content-type'], 'application/pdf')
+        self.assertIn(b'%PDF-', pdf.content[:10])
+        self.assertIn('Host', ''.join(page.extract_text() or '' for page in PdfReader(BytesIO(pdf.content)).pages))
+        self.assertEqual(self.client.get(url + '2').status_code, 403)
+        self.user = None
+        self.assertEqual(self.client.get(url + '1').status_code, 401)
 
     def test_cross_tenant_denied(self):
         self.login()

@@ -1,6 +1,7 @@
 import { useId, useState } from "react"
 import type { ReactNode } from "react"
 import { Button } from "@/components/ui/button"
+import { FileDown } from "lucide-react"
 
 const windowsRun = String.raw`# PowerShell от администратора. Сначала распакуйте ZIP в C:\BroSec\package.
 $ErrorActionPreference = 'Stop'
@@ -285,6 +286,7 @@ export function HuntingCollectionGuide({ className = "" }: { className?: string 
   const [tab, setTab] = useState<GuideTab>("prepare")
   const id = useId()
   return <section className={`space-y-5 ${className}`} aria-label="Пошаговая инструкция по сбору Threat Hunting">
+    <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-3"><div><p className="text-xs font-semibold uppercase text-muted-foreground">Инструкции по сбору</p><p className="text-sm text-muted-foreground">Пошаговые сценарии доставки и безопасного запуска</p></div><a href="/api/threat-hunting/manual.pdf" className="inline-flex min-h-10 items-center gap-2 rounded-md border px-3 text-sm hover:bg-muted"><FileDown className="size-4" aria-hidden="true"/>PDF · полное руководство</a></div>
     <header className="rounded-2xl border bg-gradient-to-br from-primary/10 via-card to-card p-5 sm:p-6">
       <p className="text-xs font-medium uppercase tracking-widest text-primary">Практическое руководство · offline collection</p>
       <h2 className="mt-2 text-xl font-semibold tracking-tight sm:text-2xl">От сборщика до проверенного результата</h2>

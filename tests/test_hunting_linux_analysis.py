@@ -64,7 +64,33 @@ class LinuxAnalysisTests(unittest.TestCase):
         result = self.analyze(rows)
         self.assertEqual(result['findings'], [])
         self.assertEqual(result['graph']['nodes'], [])
-        self.assertEqual(result['unsupported_sources'], [PREFIX + 'LinuxSUID.json'])
+        self.assertEqual(result['unsupported_sources'], [])
+
+    def test_suid_inventory_is_supported_as_context_not_compromise(self):
+        source = PREFIX + 'LinuxSUID.json'
+        rows = [
+            ('LinuxSUID', 0, {'OSPath': '/usr/bin/passwd', 'Mode': 'urwsr-xr-x', 'OwnerID': 0, 'GroupID': 0, 'Size': 68248}),
+            ('LinuxSUID', 1, {'OSPath': '/usr/bin/chsh', 'Mode': 'urwxr-xr-x', 'OwnerID': 0, 'GroupID': 0, 'Size': 52880}),
+        ]
+        result = self.analyze(rows)
+        self.assertEqual(result['unsupported_sources'], [])
+        self.assertEqual(result['source_coverage'][0]['supported'], True)
+        self.assertEqual(result['rows_reviewed']['LinuxSUID'], 2)
+        self.assertEqual([f['rule_id'] for f in result['findings']], ['inventory.linux_suid_sgid'] * 2)
+        self.assertTrue(all(f['triage_level'] == 'low' and f['assessment'] == 'observation'
+                            for f in result['findings']))
+        self.assertTrue(all(f['evidence']['Mode'] and f['evidence']['OwnerID'] == 0
+                            and f['evidence']['GroupID'] == 0 for f in result['findings']))
+        self.assertEqual(result['triage_summary']['behavioral_rows_total'], 0)
+        self.assertFalse(any(node['role'] == 'signal' for node in result['graph']['nodes']))
+
+    def test_suid_malformed_or_incomplete_rows_are_not_promoted(self):
+        for row in [{'OSPath': '/tmp/item', 'Mode': 'urwxr-xr-x'},
+                    {'OSPath': '/tmp/item', 'Mode': 'urwxr-xr-x', 'OwnerID': 'unknown', 'GroupID': 0}]:
+            with self.subTest(row=row):
+                result = self.analyze([('LinuxSUID', 0, row)])
+                self.assertEqual(result['findings'], [])
+                self.assertEqual(result['unsupported_sources'], [])
 
     def test_encoded_interpreter_and_decoded_pipeline(self):
         commands = [

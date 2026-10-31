@@ -23,7 +23,7 @@ class BaselineReview:
         # Compact metadata for every rule match; detailed evidence remains bounded.
         self.finding_inventory = []
         self.matches = 0
-        self.counts = {'Host': 0, 'Processes': 0, 'Network': 0, 'Services': 0, 'Tasks': 0, 'Startup': 0, 'LinuxServices': 0, 'LinuxCrontab': 0, 'WMIPersistence': 0, 'RegistryRunKeys': 0, 'SecurityEvents': 0, 'PowerShellEvents': 0, 'DefenderEvents': 0, 'RDPEvents': 0}
+        self.counts = {'Host': 0, 'Processes': 0, 'Network': 0, 'Services': 0, 'Tasks': 0, 'Startup': 0, 'LinuxServices': 0, 'LinuxCrontab': 0, 'LinuxSUID': 0, 'WMIPersistence': 0, 'RegistryRunKeys': 0, 'SecurityEvents': 0, 'PowerShellEvents': 0, 'DefenderEvents': 0, 'RDPEvents': 0}
         self.windows_event_counts = {}
         self.sources = set()
         self.unsupported = set()
@@ -306,7 +306,7 @@ class BaselineReview:
     @staticmethod
     def source_kind(source):
         decoded = unquote(source)
-        match = re.fullmatch(r'results/BroSec\.Offline\.Baseline/(Host|Processes|Network|Services|Tasks|Startup|LinuxServices|LinuxCrontab)\.json', decoded)
+        match = re.fullmatch(r'results/BroSec\.Offline\.Baseline/(Host|Processes|Network|Services|Tasks|Startup|LinuxServices|LinuxCrontab|LinuxSUID)\.json', decoded)
         if match:
             return match[1]
         builtin_paths = {
@@ -447,6 +447,18 @@ class BaselineReview:
                          'Конфигурация содержит закодированную PowerShell-команду либо аргументы удалённого/inline выполнения скрипта. Проверьте payload, владельца и назначение. Конфигурация не доказывает факт запуска или компрометацию.', source, index)
         elif kind in {'LinuxServices', 'LinuxCrontab'}:
             self._linux_persistence(kind, row, source, index)
+        elif kind == 'LinuxSUID':
+            mode = self._text(row, 'Mode')
+            owner = self._number(row, 'OwnerID')
+            group = self._number(row, 'GroupID')
+            path = self._text(row, 'OSPath')
+            if path and mode and owner is not None and group is not None:
+                self.add('inventory.linux_suid_sgid', 'Linux SUID/SGID file inventory requires contextual review',
+                         'A file with special permission bits was inventoried. This is common for legitimate system utilities and does not establish abuse; validate package ownership, expected path, file integrity and change history.', source, index, 'observation', [
+                             'Compare the path and package owner against the approved distribution baseline',
+                             'Verify file metadata and hash on a forensic copy; do not execute the file',
+                             'Correlate ownership and modification time with change records and execution telemetry'
+                         ])
         elif kind == 'Startup':
             self.persistence.append((kind, row, source, index))
             details = row.get('Details')
@@ -853,12 +865,12 @@ class BaselineReview:
                                 'Windows event analysis is metadata-only for fixed event IDs/channels; payload, identity and execution context are not available',
                                 'Windows source completeness is unknown; SecurityEvents may be cap-reached and DefenderEvents may be empty',
                                 'Linux analysis is literal snapshot config triage, not execution history, enablement or maliciousness attribution',
-                                'LinuxSUID remains unsupported for threat analysis: mode/owner presence alone is not a strong signal',
+                                'LinuxSUID is metadata-only inventory; a special permission bit alone does not prove abuse or compromise',
                                 'Linux shell analysis is a narrow invocation subset; compound scripts, substitutions, aliases, includes and environment resolution are unsupported',
                                 'Systemd effective configuration, drop-ins, timers, generators, dependencies and overridden vendor units are not resolved',
                                 'LinuxServices and LinuxCrontab support is partial: literal commands only; unsupported syntax is not a clean bill of health',
                                 'Отсутствие срабатываний не подтверждает отсутствие угроз',
-                                'Проверяются источники Host, Processes, Network, Services, Tasks, Startup и ограниченное подмножество LinuxServices/LinuxCrontab из точечного сбора; отсутствие persistence-источника не трактуется как отсутствие угроз',
+                                'Проверяются источники Host, Processes, Network, Services, Tasks, Startup и ограниченное подмножество LinuxServices/LinuxCrontab и метаданные LinuxSUID из точечного сбора; отсутствие persistence-источника не трактуется как отсутствие угроз',
                                 'Нет проверки подписей, хешей по репутации, ACL, истории событий и полноты сбора',
                                 'Классификация «наблюдение» не является уязвимостью или подтверждённой атакой',
                                 'Источник и строки получены из загруженного архива, авторство не подтверждено']}
