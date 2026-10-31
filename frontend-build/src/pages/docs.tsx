@@ -69,6 +69,46 @@ function sevClass(sev: string) {
   return "bg-muted text-muted-foreground"
 }
 
+
+const THREAT_HUNTING_GUIDE = {
+  analyst: [
+    ["1. Назначение и границы", "Threat Hunting — это расследование импортированного evidence-архива: система строит нормализованный снимок хоста, детерминированные сигналы, связи и цитаты. Отсутствие finding не доказывает отсутствие компрометации. Snapshot процессов/сети не является историей трафика, а ограниченный сбор не заменяет full-disk или memory forensics."],
+    ["2. Рабочий процесс", "Выберите компанию → создайте профиль под ОС → соберите один тестовый хост → проверьте статус и полноту → импортируйте архив → изучите Findings, Evidence и Timeline → подтвердите или отклоните выводы → только затем масштабируйте сбор. Для каждого вывода сохраняйте источник и номер строки."],
+    ["3. Windows: поддержанные источники", "Host, Processes, Network, Services, Tasks и Startup участвуют в сборе и deterministic analysis. Startup включает нормализованные Run/RunOnce и автозагрузку в пределах заявленного покрытия. WMI persistence и Windows event sources показываются как candidate, пока конкретный collector и Windows/VQL acceptance не подтверждены."],
+    ["4. Linux: поддержанные источники", "Host, Processes и Network; LinuxServices для ограниченных systemd service/timer путей; LinuxCrontab для системных и пользовательских cron-файлов; LinuxSUID для метаданных SUID/SGID в заявленных системных каталогах. Это bounded collection: каталоги-ссылки, полный диск и содержимое произвольных файлов не сканируются."],
+    ["5. Как читать finding", "Сначала проверьте Observation и исходные строки, затем parent/child, persistence command, endpoint и время. High-priority сигнал должен иметь достаточную корреляцию; одна эвристика — повод для review, а не verdict. Статусы Confirmed, Legitimate и Insufficient data — решение аналитика, не автоматическая истина."],
+    ["6. Evidence и citations", "Ссылка имеет формат [evidence:source#row_number]. Используйте только пары из evidence catalog конкретного результата. Нельзя ссылаться на выдуманный путь, соседний архив или строку, которой нет в UI. При конфликте AI-ответа с evidence доверяйте исходной строке и запускайте повторную проверку."],
+    ["7. AI-анализ", "AI получает подготовленный контекст выбранного результата. В запросе требуйте разделить факты, гипотезы, timeline, confidence, альтернативные объяснения и недостающие данные. Не выполняйте команды из ответа автоматически. Внешний provider может получать чувствительные данные — учитывайте политику передачи и хранения."],
+    ["8. Граф связей", "Граф показывает только связи, выведенные из доступных строк: parent/child, процесс–endpoint и persistence. Панорамируйте область зажатой левой кнопкой мыши, масштабируйте и открывайте узел для evidence. Граф ограничен budget и не доказывает lateral movement без сопоставимых журналов обеих сторон."],
+    ["9. Экспорт и дело", "Сохраняйте исходный encrypted archive, SHA-256, результат анализа и решения аналитика согласно case-retention policy. Markdown/PDF AI report — рабочий материал, пока не проверен специалистом. Не удаляйте результат, если архив или evidence нужны для расследования."],
+  ],
+  admin: [
+    ["1. Архитектура эксплуатации", "ad-security-core обслуживает FastAPI и UI; ad-security-pipeline-worker выполняет фоновые hunting jobs. Core и worker должны запускаться из одного release image и иметь совместимые каталоги data/reports. Проверяйте HTTPS readiness, worker process, права каталогов и свободное место."],
+    ["2. Профили и лимиты", "Профиль — спецификация, а не готовый произвольный VQL. Источники allowlisted, executable=false, encryption_required=true. Row budget ограничивает normalized output; он не является доказательством успешного обхода или полноты. Для широкого дела делите сбор на несколько профилей и фиксируйте scope."],
+    ["3. Статусы покрытия", "analysis_supported означает, что ingest и deterministic analysis имеют контракт. collection_supported означает проверенный bounded collector без гарантии полноты результата. candidate означает, что источник виден в каталоге, но не может быть представлен как рабочий production collector. unsupported/not verified запрещается включать в боевой профиль."],
+    ["4. Candidate gates Windows", "SecurityEvents, PowerShellEvents, DefenderEvents, RDPEvents, WMIPersistence и RegistryRunKeys требуют отдельного Windows/VQL acceptance с реальными строками, оконными ограничениями, row limits и citation resolution. До такого acceptance упаковка должна оставаться fail-closed; UI обязан показывать candidate и причину."],
+    ["5. Безопасность", "Не добавляйте credentials, private keys, client VQL или executable payloads в профиль. Соблюдайте tenant isolation, authorization и encrypted transport. AI API key хранится только на сервере. Перед внешним AI анализом определите, разрешена ли передача командных строк, usernames, IP и event payloads."],
+    ["6. Контроль релиза", "Перед deploy запускайте hunting test suite, compile/build, encrypted archive ingest, profile builder checks, citation audit и health checks. Core и worker должны иметь один image digest. При rollout сохраняйте rollback container и не удаляйте data/reports/certs volumes. После deploy проверьте UI bundle, HTTPS и worker queue."],
+    ["7. Мониторинг и восстановление", "Контролируйте queue age, failed/stale jobs, storage quota, import limits, worker recovery и ошибки AI provider. Делайте резервные копии SQLite, исходных архивов, reports и конфигурации сертификатов. Восстановление проверяйте на staging; rollback образа не восстанавливает удалённые evidence."],
+    ["8. Что не заявлять", "Не заявляйте эквивалентность KAPE/easy_triage, полную историю событий, memory/disk forensics, domain-wide visibility или отсутствие угроз по пустому результату. Такие возможности должны иметь отдельный validated workflow и явные privacy/retention boundaries."],
+  ],
+} as const
+
+function ThreatHuntingTechnicalGuide() {
+  const [audience, setAudience] = useState<"analyst" | "admin">("analyst")
+  const rows = THREAT_HUNTING_GUIDE[audience]
+  return (
+    <section className="mb-8 rounded-2xl border bg-card/40 p-4">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <div><h2 className="text-lg font-semibold">Threat Hunting · техническая документация</h2><p className="text-muted-foreground text-sm">Актуально для release с bounded collectors, deterministic analysis и citation contract.</p></div>
+        <Tabs value={audience} onValueChange={(value) => setAudience(value as "analyst" | "admin")}><TabsList><TabsTrigger value="analyst">Пользователь / аналитик</TabsTrigger><TabsTrigger value="admin">Администратор</TabsTrigger></TabsList></Tabs>
+      </div>
+      <Accordion type="multiple" defaultValue={rows.map((row) => row[0])}>{rows.map(([title, text]) => <AccordionItem key={title} value={title}><AccordionTrigger>{title}</AccordionTrigger><AccordionContent className="whitespace-pre-wrap text-sm leading-6">{text}</AccordionContent></AccordionItem>)}</Accordion>
+      <div className="mt-4 rounded-lg bg-muted/50 p-3 text-xs"><strong>Правило достоверности:</strong> supported источник означает только заявленный контракт сбора/анализа; candidate, unsupported и not verified нельзя выдавать за собранное evidence.</div>
+    </section>
+  )
+}
+
 export function Docs() {
   const { t, lang, setView } = useApp()
   const [items, setItems] = useState<WikiItem[]>([])
@@ -105,6 +145,7 @@ export function Docs() {
   return (
     <div>
       <PageHead title={t("nav.docs")} sub={t("docs.lead")} />
+      <ThreatHuntingTechnicalGuide />
       <Button className="mb-4" variant="secondary" onClick={() => setView("notes")}>Примечания к обновлению</Button>
       <div className="mb-4 flex flex-wrap gap-2">
         <Button variant="outline" onClick={() => setOpen(docs.map((row) => row[0]))}>Развернуть все</Button>

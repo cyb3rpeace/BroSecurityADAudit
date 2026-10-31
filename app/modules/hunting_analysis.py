@@ -6,7 +6,7 @@ import shlex
 from datetime import datetime, timezone
 from urllib.parse import unquote
 
-VERSION = 'forensic-triage-6-linux-persistence'
+VERSION = 'forensic-triage-7-windows-candidates'
 MAX_FINDINGS = 200
 
 TRIAGE = {
@@ -23,7 +23,8 @@ class BaselineReview:
         # Compact metadata for every rule match; detailed evidence remains bounded.
         self.finding_inventory = []
         self.matches = 0
-        self.counts = {'Host': 0, 'Processes': 0, 'Network': 0, 'Services': 0, 'Tasks': 0, 'Startup': 0, 'LinuxServices': 0, 'LinuxCrontab': 0}
+        self.counts = {'Host': 0, 'Processes': 0, 'Network': 0, 'Services': 0, 'Tasks': 0, 'Startup': 0, 'LinuxServices': 0, 'LinuxCrontab': 0, 'WMIPersistence': 0, 'RegistryRunKeys': 0, 'SecurityEvents': 0, 'PowerShellEvents': 0, 'DefenderEvents': 0, 'RDPEvents': 0}
+        self.windows_event_counts = {}
         self.sources = set()
         self.unsupported = set()
         self.processes = {}
@@ -85,7 +86,7 @@ class BaselineReview:
         if kind == 'Services':
             command = cls._text(row, 'PathName', 'AbsoluteExePath', 'ServiceDll')
             return [command] if command else []
-        if kind == 'Startup':
+        if kind in {'Startup', 'RegistryRunKeys'}:
             command = cls._text(row, 'Details')
             return [command] if command else []
         if kind in {'LinuxServices', 'LinuxCrontab'}:
@@ -315,6 +316,12 @@ class BaselineReview:
             'results/Windows.System.TaskScheduler/Analysis.json': 'Tasks',
             'results/Windows.Sys.StartupItems.json': 'Startup',
             'results/Windows.Sys.StartupItems/Analysis.json': 'Startup',
+            'results/BroSec.Acceptance.WindowsCandidates/WMIPersistence.json': 'WMIPersistence',
+            'results/BroSec.Acceptance.WindowsCandidates/RegistryRunKeys.json': 'RegistryRunKeys',
+            'results/BroSec.Acceptance.WindowsCandidates/SecurityEvents.json': 'SecurityEvents',
+            'results/BroSec.Acceptance.WindowsCandidates/PowerShellEvents.json': 'PowerShellEvents',
+            'results/BroSec.Acceptance.WindowsCandidates/DefenderEvents.json': 'DefenderEvents',
+            'results/BroSec.Acceptance.WindowsCandidates/RDPEvents.json': 'RDPEvents',
         }
         return builtin_paths.get(decoded)
 
@@ -370,7 +377,7 @@ class BaselineReview:
         self.sources.add(source)
         self._collect_iocs(source, index, row)
         if len(self.evidence_rows) < 5000:
-            self.evidence_rows[(source, index)] = {k: self._evidence_value(row[k]) for k in ('Pid', 'PID', 'pid', 'Ppid', 'PPid', 'ParentPid', 'ParentPID', 'Exe', 'Username', 'Status', 'RemoteIP', 'RemoteAddr', 'RemoteAddress', 'RemoteEndpoint', 'RemotePort', 'RemotePortNumber', 'LocalIP', 'LocalPort', 'Name', 'TaskName', 'PathName', 'AbsoluteExePath', 'ServiceDll', 'Command', 'CommandLine', 'Cmdline', 'Arguments', 'Actions', 'Details', 'OSPath', 'Content', 'ContentTruncated', 'Size', 'Mode', 'OwnerID', 'GroupID') if k in row}
+            self.evidence_rows[(source, index)] = {k: self._evidence_value(row[k]) for k in ('Pid', 'PID', 'pid', 'Ppid', 'PPid', 'ParentPid', 'ParentPID', 'Exe', 'Username', 'Status', 'RemoteIP', 'RemoteAddr', 'RemoteAddress', 'RemoteEndpoint', 'RemotePort', 'RemotePortNumber', 'LocalIP', 'LocalPort', 'Name', 'TaskName', 'PathName', 'AbsoluteExePath', 'ServiceDll', 'Command', 'CommandLine', 'Cmdline', 'Arguments', 'Actions', 'Details', 'OSPath', 'Content', 'ContentTruncated', 'Size', 'Mode', 'OwnerID', 'GroupID', 'Namespace', 'ConsumerName', 'ConsumerType', 'FilterName', 'FilterType', 'Timestamp', 'EventID', 'Channel', 'EventRecordID', 'Provider', 'Level', 'WindowStartUTC', 'WindowEndUTC') if k in row}
         timestamp = self._timestamp(row)
         if timestamp:
             self.timeline_rows_seen += 1
@@ -382,6 +389,7 @@ class BaselineReview:
             self.unsupported.add(source)
             return
         self.counts[kind] += 1
+        before_matches = len(self.findings)
         if kind == 'Host':
             hostname = self._text(row, 'Hostname', 'Fqdn', 'Host') or 'collection scope'
             self.host_rows.append((source, index, hostname))
@@ -449,6 +457,51 @@ class BaselineReview:
             if any(self._invocation_signal(self._executable(command) or '', command) for command in commands):
                 self.add('persistence.startup_suspicious_invocation', 'Подозрительная команда в автозапуске',
                          'Обнаружены аргументы кодированного или удалённого выполнения. Конфигурация не доказывает факт запуска.', source, index, 'review')
+        elif kind == 'WMIPersistence':
+            if self._text(row, 'ConsumerName') and self._text(row, 'FilterName'):
+                self.add('windows.wmi_binding', 'Permanent WMI binding requires review',
+                         'A filter/consumer binding was collected from the fixed WMI persistence query. Validate ownership, namespace and payload offline; collection is not proof of execution or compromise.', source, index, 'observation')
+        elif kind == 'RegistryRunKeys':
+            self.persistence.append((kind, row, source, index))
+            command = self._text(row, 'Details')
+            exe = self._executable(command or '')
+            signal = self._invocation_signal(exe or '', command or '') if exe and command else None
+            if signal:
+                self.add('persistence.registry_run_suspicious_invocation', 'Run key contains suspicious execution arguments',
+                         'The literal Run/RunOnce value matches a narrow encoded or remote-script invocation pattern. Validate the exact value, signer and intended software; persistence is not proof of execution.', source, index, 'review')
+            elif command and re.search(r'(?i)(?:\\temp(?:\\|/)|/temp/|\\downloads(?:\\|/)|/downloads/|appdata[\\/])', command):
+                self.add('persistence.registry_run_transient_path', 'Run key points to a user or temporary path',
+                         'The literal startup value points to a user-controlled or temporary location and requires validation of owner, signer and purpose.', source, index, 'observation')
+        elif kind in {'SecurityEvents', 'PowerShellEvents', 'DefenderEvents', 'RDPEvents'}:
+            event_id = self._number(row, 'EventID', maximum=65535)
+            channel = self._text(row, 'Channel')
+            contracts = {
+                'SecurityEvents': ('Security', {1102, 4624, 4625, 4648, 4672, 4688, 4697, 4698, 4699, 4700, 4701, 4702, 4720, 4722, 4724, 4728, 4732, 4756, 5140, 5145}),
+                'PowerShellEvents': ('Microsoft-Windows-PowerShell/Operational', {4103, 4104}),
+                'DefenderEvents': ('Microsoft-Windows-Windows Defender/Operational', {1116, 1117, 5001, 5007}),
+                'RDPEvents': ('Microsoft-Windows-TerminalServices-LocalSessionManager/Operational', {21, 22, 23, 24, 25}),
+            }
+            expected_channel, allowed_ids = contracts[kind]
+            if channel != expected_channel or event_id not in allowed_ids:
+                return
+            key = (kind, event_id, channel)
+            self.windows_event_counts[key] = self.windows_event_counts.get(key, 0) + 1
+            event_rules = {
+                ('SecurityEvents', 1102): ('windows.security.log_cleared', 'Security log-clear metadata requires review', 'review'),
+                ('DefenderEvents', 1116): ('windows.defender.detection', 'Defender detection metadata requires validation', 'review'),
+                ('DefenderEvents', 1117): ('windows.defender.action', 'Defender action metadata requires validation', 'observation'),
+                ('DefenderEvents', 5001): ('windows.defender.protection_disabled', 'Defender protection-change metadata requires review', 'review'),
+                ('DefenderEvents', 5007): ('windows.defender.configuration_change', 'Defender configuration-change metadata requires review', 'observation'),
+                ('SecurityEvents', 4697): ('windows.security.service_install', 'Security 4697 service-install metadata requires review', 'review'),
+                ('SecurityEvents', 4698): ('windows.security.scheduled_task_create', 'Security 4698 scheduled-task metadata requires review', 'review'),
+                ('SecurityEvents', 4625): ('windows.security.failed_logon', 'Security 4625 failed-logon metadata requires review', 'observation'),
+                ('PowerShellEvents', 4104): ('windows.powershell.scriptblock', 'PowerShell 4104 script-block metadata requires review', 'observation'),
+                ('RDPEvents', 21): ('windows.rdp.session_logon', 'RDP session-logon metadata was observed', 'observation'),
+                ('RDPEvents', 22): ('windows.rdp.session_shell_start', 'RDP shell-start metadata was observed', 'observation'),
+            }
+            rule = event_rules.get((kind, event_id))
+            if rule:
+                self.add(rule[0], rule[1], 'Normalized event ID/channel signal only; event payload, identity and causal context were not collected in this schema. This is not evidence of compromise.', source, index, rule[2])
         elif kind == 'Network':
             self.network.append((row, source, index))
             status = str(row.get('Status', '')).upper()
@@ -472,6 +525,12 @@ class BaselineReview:
             if address.is_global:
                 self.add('network.public_peer', 'Установлено соединение с публичным IP-адресом',
                          'Публичный адрес не является индикатором C2 сам по себе. Проверьте назначение соединения и процесс; DNS, репутация и содержимое трафика не проверялись.', source, index, 'observation')
+
+        if len(self.findings) > before_matches and (source, index) not in self.evidence_rows:
+            self.evidence_rows[(source, index)] = {k: self._evidence_value(v) for k, v in row.items()
+                if k in {'Name', 'OSPath', 'Details', 'Namespace', 'ConsumerName', 'ConsumerType',
+                         'FilterName', 'FilterType', 'Timestamp', 'EventID', 'Channel', 'EventRecordID',
+                         'Provider', 'Level', 'WindowStartUTC', 'WindowEndUTC'}}
 
     @staticmethod
     def _same_executable(left, right):
@@ -498,7 +557,7 @@ class BaselineReview:
             matches_by_row.setdefault((item['source'], item['row_number']), set()).add(item['rule_id'])
         behavioral_rules = {'process.encoded_powershell', 'process.suspicious_invocation',
                             'persistence.service_suspicious_invocation', 'persistence.task_suspicious_invocation',
-                            'persistence.startup_suspicious_invocation',
+                            'persistence.startup_suspicious_invocation', 'persistence.registry_run_suspicious_invocation',
                             'persistence.linux_systemd_suspicious_invocation', 'persistence.linux_cron_suspicious_invocation'}
         behavioral_rows = {key for key, rules in matches_by_row.items() if rules & behavioral_rules}
         for row, source, index in self.network:
@@ -637,7 +696,7 @@ class BaselineReview:
                           if pid not in self.ambiguous_pids}
         graph_rules = {'process.encoded_powershell', 'process.suspicious_invocation',
                        'process.anomalous_parent_child', 'persistence.service_suspicious_invocation',
-                       'persistence.task_suspicious_invocation', 'persistence.startup_suspicious_invocation',
+                       'persistence.task_suspicious_invocation', 'persistence.startup_suspicious_invocation', 'persistence.registry_run_suspicious_invocation', 'persistence.registry_run_suspicious_invocation',
                             'persistence.linux_systemd_suspicious_invocation', 'persistence.linux_cron_suspicious_invocation'}
         row_rules = {}
         for item in self.finding_inventory:
@@ -741,6 +800,23 @@ class BaselineReview:
                 expected.add(kind)
             else:
                 unsupported.add(item['source'])
+        coverage = []
+        windows_caps = {'WMIPersistence': 5000, 'RegistryRunKeys': 10000,
+                        'SecurityEvents': 10000, 'PowerShellEvents': 10000,
+                        'DefenderEvents': 10000, 'RDPEvents': 10000}
+        coverage_warnings = []
+        for item in source_summaries:
+            kind = self.source_kind(item['source'])
+            rows = item.get('rows', 0)
+            status = item.get('status', 'present' if rows else 'empty')
+            if kind in windows_caps:
+                status = 'cap_reached' if rows >= windows_caps[kind] else 'present' if rows else 'empty'
+                if status == 'cap_reached':
+                    coverage_warnings.append(kind + ' reached the fixed output row cap; unseen rows and collection completeness remain unknown')
+                if kind == 'DefenderEvents' and not rows:
+                    coverage_warnings.append('DefenderEvents is empty; this does not establish absence of detections or successful collection')
+            coverage.append({'source': item['source'], 'rows': rows, 'supported': kind is not None,
+                             'status': status, 'completeness': 'unknown'})
         level_counts = {}
         for finding in self.findings:
             level = finding['triage_level']
@@ -759,7 +835,10 @@ class BaselineReview:
                                    'behavioral_rows_total': len(behavioral_rows)},
 
                 'truncated': self.matches > MAX_FINDINGS, 'rows_reviewed': self.counts,
-                'source_coverage': [{'source': x['source'], 'rows': x.get('rows', 0), 'supported': self.source_kind(x['source']) is not None} for x in source_summaries],
+                'source_coverage': coverage,
+                'source_statuses': {self.source_kind(x['source']) or x['source']: {k: x[k] for k in ('status', 'rows', 'completeness')} for x in coverage},
+                'source_quality_warnings': coverage_warnings,
+                'windows_event_counts': [{'source': k[0], 'event_id': k[1], 'channel': k[2], 'rows': v} for k, v in sorted(self.windows_event_counts.items(), key=lambda item: str(item[0]))],
                 'ambiguous_process_ids': len(self.ambiguous_pids),
                 'context_graph': context_graph,
                 'graph': {'nodes': list(self.graph_nodes.values()), 'edges': self.graph_edges,
@@ -770,7 +849,9 @@ class BaselineReview:
                 'missing_sources': sorted({'Host', 'Processes', 'Network'} - expected),
                 'empty_sources': [k for k in sorted(expected & self.counts.keys()) if self.counts[k] == 0],
                 'unsupported_sources': sorted(unsupported),
-                'limitations': sorted(self.linux_gaps) + [
+                'limitations': sorted(self.linux_gaps) + coverage_warnings + [
+                                'Windows event analysis is metadata-only for fixed event IDs/channels; payload, identity and execution context are not available',
+                                'Windows source completeness is unknown; SecurityEvents may be cap-reached and DefenderEvents may be empty',
                                 'Linux analysis is literal snapshot config triage, not execution history, enablement or maliciousness attribution',
                                 'LinuxSUID remains unsupported for threat analysis: mode/owner presence alone is not a strong signal',
                                 'Linux shell analysis is a narrow invocation subset; compound scripts, substitutions, aliases, includes and environment resolution are unsupported',

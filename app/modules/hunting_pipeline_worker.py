@@ -2,8 +2,31 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 from app.modules.hunting_pipeline import advance, fail, get_job, recover_stale_jobs
 from app.modules.hunting_results import analyze_result
+
+def run_external_pending_once(base: Path, key_root: Path, company_id: int | None = None, worker_id: str = "pipeline-worker"):
+    """Claim and process one advisory AIFT job durably; no raw archive is passed."""
+    from datetime import datetime
+    from app.database import SessionLocal, ExternalAnalysisJob
+    from app.modules.external_analysis import run_aift
+    db=SessionLocal()
+    try:
+        q=db.query(ExternalAnalysisJob).filter(ExternalAnalysisJob.status == "queued")
+        if company_id is not None: q=q.filter(ExternalAnalysisJob.company_id == company_id)
+        job=q.order_by(ExternalAnalysisJob.created_at.asc()).first()
+        if job is None: return None
+        job.status="running"; job.started_at=datetime.utcnow(); db.commit(); db.refresh(job)
+        try:
+            analysis=analyze_result(base,key_root,job.company_id,job.result_id)
+            result=run_aift(base,job.id,analysis,job.profile,json.loads(job.selected_artifacts or "[]"))
+        except Exception as exc:
+            result={"status":"failed","error":str(exc)[:500]}
+        job.status=result.get("status","failed"); job.finished_at=datetime.utcnow(); job.input_sha256=result.get("input_sha256",""); job.output_sha256=result.get("output_sha256",""); job.version=result.get("version",""); job.report_path=result.get("report_path",""); job.errors=json.dumps([result["error"]],ensure_ascii=False) if result.get("error") else "[]"; job.gaps=json.dumps(["advisory output is not verified"] if job.status=="succeeded" else [],ensure_ascii=False); db.commit()
+        return job.id
+    finally: db.close()
+
 
 
 def run_pending_once(base: Path, key_root: Path, company_id: int | None = None, worker_id: str = 'pipeline-worker'):
@@ -42,7 +65,8 @@ def main():
             recover_stale_jobs(base, int(os.getenv('HUNTING_WORKER_STALE_SECONDS', '1800')), company)
             last_recovery = now
         job = run_pending_once(base, key_root, company, worker_id)
-        if job is None:
+        external = run_external_pending_once(base, key_root, company, worker_id)
+        if job is None and external is None:
             time.sleep(float(os.getenv('HUNTING_WORKER_IDLE_SECONDS', '2')))
 
 

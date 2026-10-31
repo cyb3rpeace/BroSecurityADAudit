@@ -193,11 +193,27 @@ def ask_hunting(runtime: dict[str, Any], question: str, analysis: dict[str, Any]
     if not url:
         raise RuntimeError("AI endpoint не настроен")
     key = runtime.get("api_key") or os.getenv("LLM_API_KEY") or ""
-    response = requests.post(url, json=payload, headers={"Authorization": f"Bearer {key}"} if key else {}, timeout=120)
-    response.raise_for_status()
-    body = response.json()
-    if isinstance(body, dict) and body.get("choices"):
-        return str(body["choices"][0]["message"]["content"])
-    if isinstance(body, dict) and isinstance(body.get("message"), dict):
-        return str(body["message"].get("content") or body["message"].get("response") or "")
-    raise RuntimeError("Модель вернула ответ в неизвестном формате")
+    headers = {"Authorization": f"Bearer {key}"} if key else {}
+
+    def complete(messages):
+        response = requests.post(url, json={**payload, "messages": messages}, headers=headers, timeout=120)
+        response.raise_for_status()
+        body = response.json()
+        if isinstance(body, dict) and body.get("choices"):
+            return str(body["choices"][0]["message"]["content"])
+        if isinstance(body, dict) and isinstance(body.get("message"), dict):
+            return str(body["message"].get("content") or body["message"].get("response") or "")
+        raise RuntimeError("Модель вернула ответ в неизвестном формате")
+
+    answer = complete(payload["messages"])
+    citation_audit = audit_answer_citations(answer, analysis)
+    if citation_audit["status"] == "invalid_references":
+        invalid = ", ".join(f"[evidence:{item}]" for item in citation_audit["invalid_references"][:20])
+        correction = (
+            "Предыдущий ответ нарушил контракт ссылок. Исправь его полностью. "
+            f"Недопустимые ссылки: {invalid}. "
+            "Используй только точные пары source и row_number из citation_catalog; "
+            "не добавляй новые источники или строки. Сохрани разделы и фактическую осторожность."
+        )
+        answer = complete(payload["messages"] + [{"role": "assistant", "content": answer}, {"role": "user", "content": correction}])
+    return answer

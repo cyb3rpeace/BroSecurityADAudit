@@ -48,6 +48,7 @@ from app.database import (
     ConsoleNotice,
     Inventory,
     AssistantSettings,
+    ExternalAnalysisJob,
     NotifyChannel,
     TenantNotifyChannel,
     ScanHistory,
@@ -4247,3 +4248,6 @@ def generate_honeytokens(payload: HoneyIn, user: User = Depends(get_user), db: S
 from app.modules.hunting_ai_reports import register_ai_report_routes
 register_ai_report_routes(app, get_user=get_user, get_db=get_db, resolve_company=resolve_company,
                           hunting_store=hunting_store, write_audit=write_audit)
+
+from app.modules.external_analysis_routes import register_external_analysis_routes
+register_external_analysis_routes(app, get_user=get_user, get_db=get_db, resolve_company=resolve_company, hunting_store=hunting_store, write_audit=write_audit)

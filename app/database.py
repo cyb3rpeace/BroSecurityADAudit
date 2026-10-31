@@ -110,6 +110,30 @@ class AssistantSettings(Base):
     api_key = Column(Text, default="")
 
 
+class ExternalAnalysisJob(Base):
+    """Tenant-scoped advisory AIFT job; no raw evidence or secrets are persisted here."""
+    __tablename__ = "external_analysis_jobs"
+    id = Column(String(64), primary_key=True)
+    company_id = Column(Integer, ForeignKey("companies.id", ondelete="CASCADE"), index=True, nullable=False)
+    result_id = Column(String(128), nullable=False, index=True)
+    status = Column(String(16), nullable=False, default="queued", index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    started_at = Column(DateTime, nullable=True)
+    finished_at = Column(DateTime, nullable=True)
+    provider = Column(String(64), default="AIFT")
+    tool = Column(String(128), default="aift")
+    version = Column(String(200), default="")
+    profile = Column(String(32), nullable=False)
+    input_sha256 = Column(String(64), default="")
+    output_sha256 = Column(String(64), default="")
+    selected_artifacts = Column(Text, default="[]")
+    errors = Column(Text, default="[]")
+    gaps = Column(Text, default="[]")
+    report_path = Column(String(512), default="")
+    expires_at = Column(DateTime, nullable=True)
+    external_ai_opt_in = Column(Boolean, nullable=False, default=False)
+
+
 class User(Base):
     __tablename__ = "users"
 

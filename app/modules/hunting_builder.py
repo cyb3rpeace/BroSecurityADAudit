@@ -163,7 +163,15 @@ def certificate_info(pem: str):
     if not isinstance(key, rsa.RSAPublicKey) or key.key_size < 3072:
         raise ValueError('Для шифрования требуется RSA не менее 3072 бит')
     now = datetime.now(timezone.utc)
-    if not cert.not_valid_before_utc <= now < cert.not_valid_after_utc:
+    # cryptography < 42 exposes naive not_valid_* properties; normalize both
+    # APIs to aware UTC before enforcing certificate validity.
+    not_before = getattr(cert, 'not_valid_before_utc', None)
+    not_after = getattr(cert, 'not_valid_after_utc', None)
+    if not_before is None:
+        not_before = cert.not_valid_before.replace(tzinfo=timezone.utc)
+    if not_after is None:
+        not_after = cert.not_valid_after.replace(tzinfo=timezone.utc)
+    if not_before > now or now >= not_after:
         raise ValueError('Сертификат ещё не действует или истёк')
     usage = None
     try:
