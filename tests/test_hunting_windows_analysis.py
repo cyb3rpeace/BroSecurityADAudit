@@ -54,6 +54,74 @@ class WindowsAnalysisTests(unittest.TestCase):
             r = BaselineReview(); r.consume(source('SecurityEvents'), 0, row)
             self.assertFalse(r.result([])['findings'])
 
+    def test_all_gated_event_categories_use_metadata_only_signals(self):
+        cases = [
+            ('SecurityEvents', 1102, 'Security', 'windows.security.log_cleared'),
+            ('SecurityEvents', 4697, 'Security', 'windows.security.service_install'),
+            ('SecurityEvents', 4698, 'Security', 'windows.security.scheduled_task_create'),
+            ('SecurityEvents', 4625, 'Security', 'windows.security.failed_logon'),
+            ('PowerShellEvents', 4104, 'Microsoft-Windows-PowerShell/Operational', 'windows.powershell.scriptblock'),
+            ('DefenderEvents', 1116, 'Microsoft-Windows-Windows Defender/Operational', 'windows.defender.detection'),
+            ('DefenderEvents', 1117, 'Microsoft-Windows-Windows Defender/Operational', 'windows.defender.action'),
+            ('DefenderEvents', 5001, 'Microsoft-Windows-Windows Defender/Operational', 'windows.defender.protection_disabled'),
+            ('DefenderEvents', 5007, 'Microsoft-Windows-Windows Defender/Operational', 'windows.defender.configuration_change'),
+            ('RDPEvents', 21, 'Microsoft-Windows-TerminalServices-LocalSessionManager/Operational', 'windows.rdp.session_logon'),
+            ('RDPEvents', 22, 'Microsoft-Windows-TerminalServices-LocalSessionManager/Operational', 'windows.rdp.session_shell_start'),
+        ]
+        for kind, event_id, channel, rule in cases:
+            with self.subTest(kind=kind, event_id=event_id):
+                review = BaselineReview()
+                row = {'EventID': event_id, 'Channel': channel, 'EventRecordID': 41,
+                       'EventData': 'SYNTHETIC PRIVATE EVENT PAYLOAD MUST NOT BE READ'}
+                review.consume(source(kind), 6, row)
+                output = review.result([{'source': source(kind), 'rows': 1}])
+                finding = next(item for item in output['findings'] if item['rule_id'] == rule)
+                self.assertEqual(finding['evidence_refs'], [{'source': source(kind), 'row_number': 7, 'relation': 'rule_match'}])
+                self.assertEqual(finding['evidence']['EventRecordID'], 41)
+                self.assertNotIn('EventData', finding['evidence'])
+                self.assertEqual(finding['assessment'], 'observation')
+                self.assertEqual(finding['confidence_kind'], 'heuristic_strength_not_compromise_probability')
+                self.assertEqual(output['verdict'], 'not_determined')
+
+    def test_windows_event_gates_reject_near_miss_channels_ids_and_boolean_ids(self):
+        valid = [
+            ('PowerShellEvents', 4104, 'Microsoft-Windows-PowerShell/Operational'),
+            ('DefenderEvents', 1116, 'Microsoft-Windows-Windows Defender/Operational'),
+            ('RDPEvents', 21, 'Microsoft-Windows-TerminalServices-LocalSessionManager/Operational'),
+        ]
+        for kind, event_id, channel in valid:
+            bad_rows = [
+                {'EventID': event_id, 'Channel': 'Application'},
+                {'EventID': 9999, 'Channel': channel},
+                {'EventID': True, 'Channel': channel},
+                {'EventID': str(event_id), 'Channel': channel},
+            ]
+            for row in bad_rows:
+                with self.subTest(kind=kind, row=row):
+                    review = BaselineReview()
+                    review.consume(source(kind), 0, row)
+                    self.assertEqual(review.result([])['findings'], [])
+
+    def test_wmi_binding_requires_both_names_and_does_not_promote_payload(self):
+        for row in [{'ConsumerName': 'only-consumer'}, {'FilterName': 'only-filter'},
+                    {'ConsumerName': [], 'FilterName': 'filter'}]:
+            review = BaselineReview()
+            review.consume(source('WMIPersistence'), 0, row)
+            self.assertEqual(review.result([])['findings'], [])
+        review = BaselineReview()
+        review.consume(source('WMIPersistence'), 2, {
+            'Namespace': 'root/subscription', 'ConsumerName': 'synthetic-consumer',
+            'ConsumerType': 'ActiveScriptEventConsumer', 'FilterName': 'synthetic-filter',
+            'FilterType': '__EventFilter', 'Payload': 'SYNTHETIC SECRET MUST NOT BE INCLUDED'})
+        output = review.result([{'source': source('WMIPersistence'), 'rows': 1}])
+        finding = output['findings'][0]
+        self.assertEqual(finding['rule_id'], 'windows.wmi_binding')
+        self.assertEqual(finding['triage_level'], 'low')
+        self.assertEqual(finding['evidence_refs'][0]['row_number'], 3)
+        self.assertEqual(finding['evidence']['ConsumerName'], 'synthetic-consumer')
+        self.assertNotIn('Payload', finding['evidence'])
+        self.assertEqual(output['verdict'], 'not_determined')
+
     def test_late_event_evidence_and_bounded_output(self):
         r = BaselineReview()
         for i in range(6000):

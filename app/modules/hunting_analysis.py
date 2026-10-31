@@ -485,7 +485,8 @@ class BaselineReview:
                 self.add('persistence.registry_run_transient_path', 'Run key points to a user or temporary path',
                          'The literal startup value points to a user-controlled or temporary location and requires validation of owner, signer and purpose.', source, index, 'observation')
         elif kind in {'SecurityEvents', 'PowerShellEvents', 'DefenderEvents', 'RDPEvents'}:
-            event_id = self._number(row, 'EventID', maximum=65535)
+            raw_event_id = row.get('EventID')
+            event_id = raw_event_id if type(raw_event_id) is int and 0 <= raw_event_id <= 65535 else None
             channel = self._text(row, 'Channel')
             contracts = {
                 'SecurityEvents': ('Security', {1102, 4624, 4625, 4648, 4672, 4688, 4697, 4698, 4699, 4700, 4701, 4702, 4720, 4722, 4724, 4728, 4732, 4756, 5140, 5145}),
