@@ -67,7 +67,8 @@ def register_ai_report_routes(app, *, get_user, get_db, resolve_company, hunting
 
     @router.post("/api/threat-hunting/results/{result_id}/ai-report")
     def export_ai_report(result_id: str, company_id: int, format: Literal["md", "pdf"],
-                         payload: AIReportIn, user=Depends(get_user), db=Depends(get_db)):
+                         payload: AIReportIn, user=Depends(get_user), db=Depends(get_db),
+                         lang: Literal["ru", "en"] = "ru"):
         from app.modules.hunting_results import get_result, analyze_result
         company = resolve_company(user, db, company_id)
         try:
@@ -89,7 +90,7 @@ def register_ai_report_routes(app, *, get_user, get_db, resolve_company, hunting
         # Summary hostnames may contain /etc/hosts or DNS aliases, not host identities.
         # This route is scoped to one archive; it never claims group investigation.
         try:
-            data = (build_ai_markdown if format == "md" else build_ai_pdf)(company.id, item, analysis, payload.answer)
+            data = (build_ai_markdown if format == "md" else build_ai_pdf)(company.id, item, analysis, payload.answer, lang)
         except (ValueError, OSError) as exc:
             raise HTTPException(422, "Unable to render AI report (Unicode font required for PDF)") from exc
         write_audit(db, user, "hunting_ai_report_export", f"result={item['id']}; format={format}", company.id)

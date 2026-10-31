@@ -200,15 +200,52 @@ def _ai_sections(company_id: int, result: dict, analysis: dict, answer: str):
     ]
 
 
-def build_ai_markdown(company_id: int, result: dict, analysis: dict, answer: str) -> bytes:
+_REPORT_TEXT = {
+    "ru": {"title":"Подробный криминалистический отчёт по хосту", "status":"Статус и оценка", "identity":"Идентификация и целостность", "scope":"Объём и полнота доказательств", "verdict":"Вывод о компрометации", "timeline":"Хронология наблюдений (UTC)", "graph":"Граф связей", "iocs":"Индикаторы компрометации (IOC)", "ttps":"Сопоставление с MITRE ATT&CK", "access":"Гипотезы первоначального доступа", "findings":"Находки и наблюдаемые инструменты", "reviews":"Решения аналитика", "limitations":"Ограничения расследования", "ai":"Предоставленный AI-ответ (непроверенный)", "undetermined":"Не определено: данных недостаточно для подтверждения или исключения компрометации.", "review":"Есть сигналы, требующие проверки; компрометация не подтверждена.", "none":"Срабатываний не найдено. Это не доказывает отсутствие компрометации.", "initial":"Первоначальный доступ не установлен: доступные источники не дают достаточной телеметрии для определения вектора проникновения.", "ai_note":"AI-текст предоставлен клиентом; происхождение модели и достоверность утверждений не проверялись.", "unsupported":"Для правил анализа нет надёжного сопоставления ATT&CK."},
+    "en": {"title":"Detailed Host Forensic Report", "status":"Status and assessment", "identity":"Identity and integrity", "scope":"Evidence scope and completeness", "verdict":"Compromise conclusion", "timeline":"Observation timeline (UTC)", "graph":"Relationship graph", "iocs":"Indicators of compromise (IOCs)", "ttps":"MITRE ATT&CK mapping", "access":"Initial access hypotheses", "findings":"Findings and observed tools", "reviews":"Analyst decisions", "limitations":"Investigation limitations", "ai":"Supplied AI answer (unverified)", "undetermined":"Undetermined: evidence is insufficient to confirm or rule out compromise.", "review":"Signals require review; compromise is not confirmed.", "none":"No detections. This does not prove absence of compromise.", "initial":"Initial access is undetermined: available sources do not provide sufficient telemetry to identify an entry vector.", "ai_note":"AI text was supplied by the client; model provenance and claim accuracy were not verified.", "unsupported":"No reliable ATT&CK mapping is available for these analysis rules."},
+}
+_ATTACK_RULES = {"process.encoded_powershell":("T1059.001","PowerShell","Execution"), "process.suspicious_invocation":("T1059","Command and Scripting Interpreter","Execution"), "persistence.service_suspicious_invocation":("T1543.003","Windows Service","Persistence, Privilege Escalation"), "persistence.task_suspicious_invocation":("T1053.005","Scheduled Task","Execution, Persistence"), "persistence.startup_suspicious_invocation":("T1547.001","Registry Run Keys / Startup Folder","Persistence"), "persistence.registry_run_suspicious_invocation":("T1547.001","Registry Run Keys / Startup Folder","Persistence"), "persistence.linux_systemd_suspicious_invocation":("T1543.002","Systemd Service","Persistence, Privilege Escalation"), "persistence.linux_cron_suspicious_invocation":("T1053.003","Cron","Execution, Persistence")}
+
+def _host_investigation_sections(company_id, result, analysis, answer, language):
+    t = _REPORT_TEXT["ru" if language == "ru" else "en"]
+    findings = analysis.get("findings", [])
+    from app.modules.hunting_ai import audit_answer_citations
+    citation_audit = audit_answer_citations(answer, analysis)
+    confirmed = [f for f in findings if (f.get("review") or {}).get("status") == "confirmed"]
+    unresolved = [f for f in findings if (f.get("review") or {}).get("status") not in {"benign", "confirmed"}]
+    verdict = t["review"] if unresolved else t["undetermined"]
+    if confirmed:
+        verdict = ("Есть находки, подтверждённые аналитиком; статус компрометации хоста отдельно не установлен."
+                   if language == "ru" else "Some findings were analyst-confirmed; host compromise status is not independently established.")
+    triage = analysis.get("triage_summary", {})
+    summary = result.get("summary", {})
+    attack = []
+    for f in findings:
+        m = _ATTACK_RULES.get(f.get("rule_id"))
+        if m: attack.append({"technique_id":m[0],"technique":m[1],"tactics":m[2],"rule_id":f.get("rule_id"),"evidence":{"source":f.get("source"),"row_number":f.get("row_number")},"note":"Сопоставление правила, не атрибуция злоумышленника." if language == "ru" else "Rule mapping, not attacker attribution."})
+    return [
+        (t["status"], ("UNREVIEWED; " if language != "ru" else "НЕ ПРОВЕРЕНО; ") + verdict),
+        (t["identity"],json.dumps({"company_id":company_id,"company_label":"Company ID: " + str(company_id),"result_id":result.get("id"),"archive_sha256":result.get("sha256"),"archive_created_at":result.get("created_at"),"exported_at_utc":datetime.now(timezone.utc).isoformat(),"ruleset":analysis.get("ruleset"),"verdict":analysis.get("verdict")},ensure_ascii=False,indent=2,default=str)),
+        (t["scope"],json.dumps({"reported_hostnames":summary.get("hostnames",[]),"sources":analysis.get("source_coverage",summary.get("sources",[])),"rows_reviewed":analysis.get("rows_reviewed",{}),"missing_sources":analysis.get("missing_sources",[]),"empty_sources":analysis.get("empty_sources",[]),"unsupported_sources":analysis.get("unsupported_sources",[]),"collection_provenance":summary.get("collection_provenance",{}),"findings_truncated":analysis.get("truncated",False),"timeline_truncated":triage.get("timeline_truncated",False),"graph_truncated":analysis.get("graph",{}).get("truncated",False)},ensure_ascii=False,indent=2,default=str)),
+        (t["verdict"],verdict), (t["timeline"],json.dumps(triage.get("timeline",[]),ensure_ascii=False,indent=2,default=str)),
+        (t["graph"],json.dumps(analysis.get("graph",{}),ensure_ascii=False,indent=2,default=str)), (t["iocs"],json.dumps(analysis.get("iocs",[]),ensure_ascii=False,indent=2,default=str)),
+        (t["ttps"],json.dumps(attack,ensure_ascii=False,indent=2,default=str) if attack else t["unsupported"]),
+        (t["access"],t["initial"]), (t["findings"],json.dumps(findings,ensure_ascii=False,indent=2,default=str)),
+        (t["reviews"],json.dumps([{k:f.get(k) for k in ("rule_id","title","source","row_number","review")} for f in findings],ensure_ascii=False,indent=2,default=str)),
+        (t["limitations"],json.dumps({"analysis_limitations":analysis.get("limitations",[]),"missing_sources":analysis.get("missing_sources",[]),"note":t["undetermined"]},ensure_ascii=False,indent=2,default=str)),
+        (("AI citation audit (reference membership only; claims NOT verified)" if language != "ru" else "Проверка ссылок AI (только наличие ссылок; утверждения не проверены)"),json.dumps(citation_audit,ensure_ascii=False,indent=2,default=str)),
+        (t["ai"],t["ai_note"]+"\n"+answer)]
+
+def build_ai_markdown(company_id: int, result: dict, analysis: dict, answer: str, language: str = "en") -> bytes:
     """Indent untrusted content as literal Markdown code, including HTML and links."""
-    parts = ["# AI-assisted host investigation report", ""]
-    for heading, text in _ai_sections(company_id, result, analysis, answer):
+    t = _REPORT_TEXT["ru" if language == "ru" else "en"]
+    parts = ["# " + t["title"], ""]
+    for heading, text in _host_investigation_sections(company_id, result, analysis, answer, language):
         parts.extend(["## " + heading, "", *["    " + line for line in text.split("\n")], ""])
     return ("\n".join(parts) + "\n").encode("utf-8")
 
 
-def build_ai_pdf(company_id: int, result: dict, analysis: dict, answer: str) -> bytes:
+def build_ai_pdf(company_id: int, result: dict, analysis: dict, answer: str, language: str = "en") -> bytes:
     """Build bytes only; ReportLab receives escaped text, never user markup."""
     from io import BytesIO
     output = BytesIO()
@@ -216,8 +253,9 @@ def build_ai_pdf(company_id: int, result: dict, analysis: dict, answer: str) -> 
     body = ParagraphStyle("AIReportBody", fontName=font, fontSize=9, leading=13,
                           splitLongWords=True, spaceAfter=3)
     heading_style = ParagraphStyle("AIReportHeading", parent=body, fontSize=13, leading=17, spaceBefore=10)
-    story = [Paragraph("AI-assisted host investigation report", heading_style)]
-    for heading, text in _ai_sections(company_id, result, analysis, answer):
+    t = _REPORT_TEXT["ru" if language == "ru" else "en"]
+    story = [Paragraph(_pdf_text(t["title"]), heading_style)]
+    for heading, text in _host_investigation_sections(company_id, result, analysis, answer, language):
         story.append(Paragraph(_pdf_text(heading), heading_style))
         # Small flowables prevent huge paragraphs/lines from overflowing a page.
         for line in text.split("\n"):

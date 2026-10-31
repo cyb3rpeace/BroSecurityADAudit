@@ -85,6 +85,15 @@ class AIReportEndpointTests(unittest.TestCase):
         self.assertEqual(before, {str(p) for p in self.base.rglob("*")})
         self.assertEqual(len(self.audit), 2)
 
+    def test_report_language_is_validated_and_rendered(self):
+        self.login()
+        with patch("app.modules.hunting_results.analyze_result", return_value=self.analysis):
+            response = self.client.post(self.url+"md&lang=ru", json={"answer":"Проверка"})
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertIn("Подробный криминалистический отчёт", response.text)
+            invalid = self.client.post(self.url.replace("format=", "format=md&lang=xx"), json={"answer":"ok"})
+            self.assertEqual(invalid.status_code, 422)
+
     def test_invalid_answers_formats_and_missing_query(self):
         self.login()
         for payload in [{}, {"answer":""}, {"answer":"  "}, {"answer":"x"*100001}, {"answer":123}, {"answer":None}]:

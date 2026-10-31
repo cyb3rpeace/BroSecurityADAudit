@@ -16,6 +16,28 @@ class AIReportBuilderTests(unittest.TestCase):
         for word in ["UNREVIEWED", "Company ID: 9", "b"*64, "test-rules", "processes.jsonl", "2026-01-01T00:00:00Z", '"timeline_truncated": true', "not verified"]:
             self.assertIn(word, text)
 
+
+    def test_russian_host_report_contains_structured_evidence_and_verdict(self):
+        from app.modules.hunting_reports import build_ai_markdown
+        analysis = {"ruleset":"r1","verdict":"not_determined","findings":[{"rule_id":"process.encoded_powershell","title":"Encoded PowerShell","source":"results/Processes.json","row_number":7,"review":{"status":"needs_review"}}],"triage_summary":{"timeline":[{"timestamp":"2026-10-31T10:30:00+00:00","source":"results/Processes.json","row_number":7}]},"graph":{"nodes":[{"id":"p1","label":"powershell.exe","evidence_refs":[{"source":"results/Processes.json","row_number":7}]}],"edges":[]},"iocs":[{"type":"sha256","value":"a"*64,"evidence_refs":[{"source":"results/Processes.json","row_number":7,"field":"Hash"}]}],"source_coverage":[{"source":"Processes","rows":1}],"rows_reviewed":{"Processes":1},"missing_sources":["SecurityEvents"],"limitations":["bounded evidence"]}
+        report = build_ai_markdown(1, self.result, analysis, "Ответ модели", "ru").decode()
+        for expected in ["Подробный криминалистический отчёт по хосту", "Хронология наблюдений (UTC)", "Граф связей", "Индикаторы компрометации (IOC)", "MITRE ATT&CK", "T1059.001", "Первоначальный доступ не установлен", "компрометация не подтверждена", "2026-10-31T10:30:00+00:00", "results/Processes.json", "Ответ модели"]:
+            self.assertIn(expected, report)
+        self.assertNotIn("The answer is supplied", report)
+
+    def test_confirmed_finding_does_not_claim_host_compromise(self):
+        from app.modules.hunting_reports import build_ai_markdown
+        analysis = {"verdict":"not_determined", "findings":[{"rule_id":"process.encoded_powershell", "source":"p.json", "row_number":1, "review":{"status":"confirmed"}}]}
+        report = build_ai_markdown(1, self.result, analysis, "answer", "ru").decode()
+        self.assertIn("статус компрометации хоста отдельно не установлен", report)
+        self.assertNotIn("Подтверждено аналитиком по отмеченным находкам", report)
+
+    def test_english_host_report_uses_english_sections(self):
+        report = build_ai_markdown(1, self.result, self.analysis, "answer", "en").decode()
+        self.assertIn("Detailed Host Forensic Report", report)
+        self.assertIn("Compromise conclusion", report)
+        self.assertIn("Initial access is undetermined", report)
+
     def test_pdf_unicode_and_no_active_links(self):
         data = build_ai_pdf(9, self.result, self.analysis, self.answer)
         self.assertTrue(data.startswith(b"%PDF-"))
