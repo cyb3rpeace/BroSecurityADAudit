@@ -6,6 +6,8 @@ This module is a bounded, evidence-oriented investigation workflow, not a comple
 
 The current platform supports bounded host, process, network, Windows service/task/startup, and Linux fixed-path service/cron/SUID sources according to each release's catalog and package allowlist. Linux SUID/SGID is now recognized in analysis as low-severity inventory context; it is not interpreted as suspicious by permission bits alone. Windows Security, PowerShell, Defender, RDP events, WMI persistence, Run/RunOnce and local accounts remain gated candidates until a signed-off Windows real-engine acceptance is recorded for supported OS versions.
 
+See [the source-by-source coverage audit](THREAT_HUNTING_COVERAGE.md) for the verified profile, query, privilege, test and limitation matrix. It inventories this source tree; it is not an assertion of complete forensic coverage.
+
 ## Workflow
 
 1. Select the authorized tenant and create an OS-specific profile using only packageable sources.
@@ -24,6 +26,14 @@ The current platform supports bounded host, process, network, Windows service/ta
 - Candidate sources are disabled for packaging. Catalog presence or a generated PDF is not evidence of execution.
 - Row caps constrain output, not all query scan cost, bytes read, memory, or endpoint operating-system overhead.
 - Missing or empty sources do not establish absence of malicious activity. Hash integrity establishes byte consistency, not source authenticity or acquisition completeness.
+
+## Verified source inventory (2026-10-31)
+
+The current collector is **not volatile-first**. Profiles retain operator-selected order, but packages define no volatile-response tier or per-artifact start/end journal. `CaptureStartedUTC` is a collector-start claim; there is no measured endpoint clock offset, per-source duration, action journal, resumable checkpoint, or tamper-evident chain-of-custody ledger. Ingest records SHA-256 per JSON result file and uploaded archive integrity can be checked; there is no signed acquisition manifest or per-row hash chain.
+
+Executable profiles are bounded snapshots. Windows packages request admin rights; Linux instructions use an approved administrative session/root. These are privilege expectations, not proof that every source had sufficient access. The collector has timeout and CPU/concurrency settings, but row limits do not bound all scan work, bytes, memory, or OS impact. RAM and full-disk imaging are not implemented and are not silently enabled.
+
+The detailed matrix is in `THREAT_HUNTING_COVERAGE.md`. Linux has the only packaged executable acceptance, against inert fixtures in a disposable Linux container; this is not a production OS/version matrix. Windows candidate analyzer and query-contract tests are synthetic/server-side only. Windows endpoint collection remains unverified. Missing evidence never proves that an event did not occur.
 
 ## AI and evidence citations
 
