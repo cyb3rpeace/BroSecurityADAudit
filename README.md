@@ -138,6 +138,22 @@ Enable-NetFirewallRule -Name WINRM-HTTP-In-TCP
 - 📄 Docker volume `reports` — отчёты. В git их нет.
 - 🔐 `.env` — пароли и ключи. В git его нет, есть только `.env.example`.
 
+## Production Readiness Statement
+
+**BroSecurityADAudit is production-ready and operational in the verified, bounded Threat Hunting and Active Directory audit scope.** Production cutover and smoke checks passed; existing tenant data and keys were preserved; the documented application suite reported **285 passed, 10 skipped**.
+
+This is not a claim of complete DFIR coverage or completion of every planned future source. Windows EVTX Security, PowerShell, Defender and RDP events, WMI persistence, and Registry Run/RunOnce have not passed live Windows endpoint acceptance. They remain `candidate` and are excluded from production collector packages. Do not enable or advertise them as supported until the documented Windows acceptance gate passes. Readiness applies to packaged, verified features only.
+
+The system is bounded live-response/triage. It does not provide memory acquisition, full disk imaging or a complete forensic chain-of-custody ledger.
+
+## Technical Documentation Set
+
+- [Business and Functional Requirements (BRD/FRD)](docs/BRD_FRD.md)
+- [System Architecture and Data Flows (SAD)](docs/SAD.md)
+- [Production Deployment Guide](docs/DEPLOYMENT.md)
+- [Operations, Runbooks and Disaster Recovery](docs/OPERATIONS_DR.md)
+- [API, OpenAPI and Database Reference](docs/API_DATABASE.md)
+- [OpenAPI snapshot](docs/openapi.json)
 ## Threat Hunting
 
 - Импорт зашифрованного триажа, tenant-изоляция, исходные строки и проверка SHA-256.
