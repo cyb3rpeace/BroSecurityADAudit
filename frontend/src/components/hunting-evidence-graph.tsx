@@ -41,6 +41,7 @@ export function HuntingEvidenceGraph({ graph, onEvidence }: HuntingEvidenceGraph
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [zoom, setZoom] = useState(1)
   const viewport = useRef<HTMLDivElement>(null)
+  const pan = useRef<{ x: number; y: number; left: number; top: number } | null>(null)
   const nodeElements = useRef(new Map<string, SVGGElement>())
   const uid = useId().replace(/:/g, "")
   const helpId = `${uid}-help`
@@ -111,6 +112,24 @@ export function HuntingEvidenceGraph({ graph, onEvidence }: HuntingEvidenceGraph
   const refs = selected?.evidence_refs || []
   const adjacent = selected ? model.edges.filter(edge => edge.source === selected.id || edge.target === selected.id) : []
   const resetView = () => { setZoom(1); viewport.current?.scrollTo({ top: 0, left: 0, behavior: "smooth" }) }
+  const startPan = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || (event.target as Element).closest('[role="button"]')) return
+    const element = viewport.current
+    if (!element) return
+    pan.current = { x: event.clientX, y: event.clientY, left: element.scrollLeft, top: element.scrollTop }
+    element.setPointerCapture(event.pointerId)
+  }
+  const movePan = (event: React.PointerEvent<HTMLDivElement>) => {
+    const element = viewport.current
+    const origin = pan.current
+    if (!element || !origin) return
+    element.scrollLeft = origin.left - (event.clientX - origin.x)
+    element.scrollTop = origin.top - (event.clientY - origin.y)
+  }
+  const stopPan = (event: React.PointerEvent<HTMLDivElement>) => {
+    pan.current = null
+    if (viewport.current?.hasPointerCapture(event.pointerId)) viewport.current.releasePointerCapture(event.pointerId)
+  }
   const selectNode = (id: string, focus = false) => {
     setSelectedId(id)
     if (focus) { const element = nodeElements.current.get(id); element?.focus(); element?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" }) }
@@ -139,9 +158,9 @@ export function HuntingEvidenceGraph({ graph, onEvidence }: HuntingEvidenceGraph
     <div className="grid min-w-0 xl:grid-cols-[minmax(0,1fr)_320px]">
       <div className="min-w-0">
         <div className="flex flex-wrap gap-x-4 gap-y-2 border-b px-4 py-2 text-[10px] text-muted-foreground">{["process", "network", "persistence", "host"].map(kind => { const info = kindInfo(kind); return <span key={kind} className="inline-flex items-center gap-1.5"><info.Icon className={`h-3.5 w-3.5 ${info.color}`} aria-hidden="true" />{info.label}</span> })}<span>→ направление отношения, не поток атаки</span></div>
-        <p id={helpId} className="px-4 py-2 text-[11px] text-muted-foreground">Tab — узел; Enter / пробел — инспектор; стрелки — соседний узел в списке; Esc — снять выбор. Область прокручивается по обеим осям.</p>
+        <p id={helpId} className="px-4 py-2 text-[11px] text-muted-foreground">Tab — узел; Enter / пробел — инспектор; стрелки — соседний узел в списке; Esc — снять выбор. Область прокручивается по обеим осям; зажмите левую кнопку мыши на свободном месте и перетащите граф.</p>
         {!model.nodes.length ? <div className="flex min-h-80 flex-col items-center justify-center gap-3 p-8 text-center"><GitBranch className="h-9 w-9 text-muted-foreground" aria-hidden="true" /><h4 className="font-medium">{query.trim() ? "Совпадений нет" : "Сильных поведенческих связей не выявлено"}</h4><p className="max-w-lg text-sm text-muted-foreground">{query.trim() ? "Попробуйте имя процесса, адрес или путь источника. Поиск не создаёт новых связей." : "В основном графе скрыт обычный фон. Показаны только поведенческие сигналы и их доказательный контекст. Проверьте полноту сбора и исходные данные: пустой граф не доказывает безопасность."}</p>{query && <button type="button" className={controlClass} onClick={() => setQuery("")}>Очистить поиск</button>}</div>
-          : <div ref={viewport} tabIndex={0} role="region" aria-label="Прокручиваемая схема связей" aria-describedby={helpId} className="h-[540px] max-w-full overflow-auto bg-muted/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary">
+          : <div ref={viewport} tabIndex={0} role="region" aria-label="Прокручиваемая схема связей" aria-describedby={helpId} className={`h-[540px] max-w-full overflow-auto bg-muted/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary ${pan.current ? "cursor-grabbing" : "cursor-grab"}`} onPointerDown={startPan} onPointerMove={movePan} onPointerUp={stopPan} onPointerCancel={stopPan} style={{ touchAction: "none" }}>
             <svg width={model.width * zoom} height={model.height * zoom} viewBox={`0 0 ${model.width} ${model.height}`} className="block max-w-none" role="group" aria-label="Направленный граф отношений">
               <defs><pattern id={`${uid}-grid`} width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="0.7" fill="currentColor" className="text-muted-foreground/20" /></pattern><marker id={`${uid}-arrow`} markerWidth="9" markerHeight="9" refX="8" refY="4" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,4 L0,8 Z" fill="currentColor" /></marker></defs>
               <rect width="100%" height="100%" fill={`url(#${uid}-grid)`} aria-hidden="true" />

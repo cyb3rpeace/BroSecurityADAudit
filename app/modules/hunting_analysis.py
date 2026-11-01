@@ -266,11 +266,11 @@ class BaselineReview:
             if not signal:
                 continue
             rule = 'persistence.linux_' + ('systemd' if kind == 'LinuxServices' else 'cron') + '_suspicious_invocation'
-            self.add(rule, 'Linux persistence invocation requires review',
-                     f'Literal configuration matches {signal}; configuration is not proof of execution or compromise.', source, index,
-                     checks=['Review the full original configuration row and owning package/user',
-                             'Validate payload offline without executing it',
-                             'Corroborate with execution history and approved administration'])
+            self.add(rule, 'Вызов механизма автозапуска Linux требует проверки',
+                     f'Конфигурация буквально соответствует шаблону «{signal}»; это не доказывает запуск или компрометацию.', source, index,
+                     checks=['Проверьте исходную строку конфигурации, пакет и владельца',
+                             'Проверьте полезную нагрузку офлайн, не запуская её',
+                             'Сопоставьте с историей выполнения и разрешёнными административными действиями'])
             if self.findings and (self.findings[-1]['source'], self.findings[-1]['row_offset'], self.findings[-1]['rule_id']) == (source, index, rule):
                 self.findings[-1]['config_evidence'] = {'field': 'Content', 'line_number': number,
                     'line': raw[:4096], 'line_excerpt_truncated': len(raw) > 4096,
@@ -453,7 +453,7 @@ class BaselineReview:
             group = self._number(row, 'GroupID')
             path = self._text(row, 'OSPath')
             if path and mode and owner is not None and group is not None:
-                self.add('inventory.linux_suid_sgid', 'Linux SUID/SGID file inventory requires contextual review',
+                self.add('inventory.linux_suid_sgid', 'Инвентаризация файлов Linux SUID/SGID требует проверки контекста',
                          'A file with special permission bits was inventoried. This is common for legitimate system utilities and does not establish abuse; validate package ownership, expected path, file integrity and change history.', source, index, 'observation', [
                              'Compare the path and package owner against the approved distribution baseline',
                              'Verify file metadata and hash on a forensic copy; do not execute the file',
@@ -471,19 +471,19 @@ class BaselineReview:
                          'Обнаружены аргументы кодированного или удалённого выполнения. Конфигурация не доказывает факт запуска.', source, index, 'review')
         elif kind == 'WMIPersistence':
             if self._text(row, 'ConsumerName') and self._text(row, 'FilterName'):
-                self.add('windows.wmi_binding', 'Permanent WMI binding requires review',
-                         'A filter/consumer binding was collected from the fixed WMI persistence query. Validate ownership, namespace and payload offline; collection is not proof of execution or compromise.', source, index, 'observation')
+                self.add('windows.wmi_binding', 'Постоянная привязка WMI требует проверки',
+                         'В фиксированном запросе persistence WMI обнаружена связь filter/consumer. Проверьте владельца, пространство имён и полезную нагрузку офлайн; сбор данных не доказывает запуск или компрометацию.', source, index, 'observation')
         elif kind == 'RegistryRunKeys':
             self.persistence.append((kind, row, source, index))
             command = self._text(row, 'Details')
             exe = self._executable(command or '')
             signal = self._invocation_signal(exe or '', command or '') if exe and command else None
             if signal:
-                self.add('persistence.registry_run_suspicious_invocation', 'Run key contains suspicious execution arguments',
-                         'The literal Run/RunOnce value matches a narrow encoded or remote-script invocation pattern. Validate the exact value, signer and intended software; persistence is not proof of execution.', source, index, 'review')
+                self.add('persistence.registry_run_suspicious_invocation', 'Ключ Run содержит подозрительные аргументы выполнения',
+                         'Буквальное значение Run/RunOnce соответствует узкому шаблону кодированного или удалённого сценария. Проверьте точное значение, подписанта и назначение программы; наличие автозапуска не доказывает выполнение.', source, index, 'review')
             elif command and re.search(r'(?i)(?:\\temp(?:\\|/)|/temp/|\\downloads(?:\\|/)|/downloads/|appdata[\\/])', command):
-                self.add('persistence.registry_run_transient_path', 'Run key points to a user or temporary path',
-                         'The literal startup value points to a user-controlled or temporary location and requires validation of owner, signer and purpose.', source, index, 'observation')
+                self.add('persistence.registry_run_transient_path', 'Ключ Run указывает на пользовательский или временный путь',
+                         'Буквальное значение автозапуска указывает на пользовательский или временный каталог; проверьте владельца, подписанта и назначение.', source, index, 'observation')
         elif kind in {'SecurityEvents', 'PowerShellEvents', 'DefenderEvents', 'RDPEvents'}:
             raw_event_id = row.get('EventID')
             event_id = raw_event_id if type(raw_event_id) is int and 0 <= raw_event_id <= 65535 else None
@@ -500,21 +500,21 @@ class BaselineReview:
             key = (kind, event_id, channel)
             self.windows_event_counts[key] = self.windows_event_counts.get(key, 0) + 1
             event_rules = {
-                ('SecurityEvents', 1102): ('windows.security.log_cleared', 'Security log-clear metadata requires review', 'review'),
-                ('DefenderEvents', 1116): ('windows.defender.detection', 'Defender detection metadata requires validation', 'review'),
-                ('DefenderEvents', 1117): ('windows.defender.action', 'Defender action metadata requires validation', 'observation'),
-                ('DefenderEvents', 5001): ('windows.defender.protection_disabled', 'Defender protection-change metadata requires review', 'review'),
-                ('DefenderEvents', 5007): ('windows.defender.configuration_change', 'Defender configuration-change metadata requires review', 'observation'),
-                ('SecurityEvents', 4697): ('windows.security.service_install', 'Security 4697 service-install metadata requires review', 'review'),
-                ('SecurityEvents', 4698): ('windows.security.scheduled_task_create', 'Security 4698 scheduled-task metadata requires review', 'review'),
-                ('SecurityEvents', 4625): ('windows.security.failed_logon', 'Security 4625 failed-logon metadata requires review', 'observation'),
-                ('PowerShellEvents', 4104): ('windows.powershell.scriptblock', 'PowerShell 4104 script-block metadata requires review', 'observation'),
-                ('RDPEvents', 21): ('windows.rdp.session_logon', 'RDP session-logon metadata was observed', 'observation'),
-                ('RDPEvents', 22): ('windows.rdp.session_shell_start', 'RDP shell-start metadata was observed', 'observation'),
+                ('SecurityEvents', 1102): ('windows.security.log_cleared', 'Метаданные очистки журнала безопасности требуют проверки', 'review'),
+                ('DefenderEvents', 1116): ('windows.defender.detection', 'Метаданные обнаружения Defender требуют проверки', 'review'),
+                ('DefenderEvents', 1117): ('windows.defender.action', 'Метаданные действия Defender требуют проверки', 'observation'),
+                ('DefenderEvents', 5001): ('windows.defender.protection_disabled', 'Метаданные изменения защиты Defender требуют проверки', 'review'),
+                ('DefenderEvents', 5007): ('windows.defender.configuration_change', 'Метаданные изменения конфигурации Defender требуют проверки', 'observation'),
+                ('SecurityEvents', 4697): ('windows.security.service_install', 'Метаданные установки службы Security 4697 требуют проверки', 'review'),
+                ('SecurityEvents', 4698): ('windows.security.scheduled_task_create', 'Метаданные создания задачи Security 4698 требуют проверки', 'review'),
+                ('SecurityEvents', 4625): ('windows.security.failed_logon', 'Метаданные неудачного входа Security 4625 требуют проверки', 'observation'),
+                ('PowerShellEvents', 4104): ('windows.powershell.scriptblock', 'Метаданные блока сценария PowerShell 4104 требуют проверки', 'observation'),
+                ('RDPEvents', 21): ('windows.rdp.session_logon', 'Зафиксированы метаданные входа в сеанс RDP', 'observation'),
+                ('RDPEvents', 22): ('windows.rdp.session_shell_start', 'Зафиксированы метаданные запуска оболочки RDP', 'observation'),
             }
             rule = event_rules.get((kind, event_id))
             if rule:
-                self.add(rule[0], rule[1], 'Normalized event ID/channel signal only; event payload, identity and causal context were not collected in this schema. This is not evidence of compromise.', source, index, rule[2])
+                self.add(rule[0], rule[1], 'Только нормализованный сигнал по ID события и каналу; полезная нагрузка, личность и причинный контекст в этой схеме не собраны. Это не доказательство компрометации.', source, index, rule[2])
         elif kind == 'Network':
             self.network.append((row, source, index))
             status = str(row.get('Status', '')).upper()
