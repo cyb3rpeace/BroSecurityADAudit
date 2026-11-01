@@ -1,3 +1,9 @@
+# Final Threat Hunting delivery — 2026-11-01
+
+- Production rollout completed with persistent data, tenant keys, existing users and non-hunting functionality preserved.
+- Added final delivery record covering verified sources, acceptance results, evidence semantics, report formats, operational procedure and rollback boundaries.
+- Documented 285 passing tests and 10 skipped tests; Windows EVTX, WMI persistence and Registry Run/RunOnce remain candidate and are excluded from executable packages until real Windows acceptance.
+
 ## 2.6.26 — Threat Hunting UX and collection guides (2026-10-31)
 
 - Reworked the in-app reference into a responsive technical documentation workspace with category navigation, searchable content, and focused article reading.

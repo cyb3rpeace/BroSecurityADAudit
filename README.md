@@ -4,7 +4,7 @@
 
 Платформа безопасно собирает проверенные сведения из AD по LDAP/LDAPS и с Windows-хостов по WinRM, выполняет анализ без обязательного AI и показывает только высокоинформативные поведенческие сигналы: обфусцированные и подозрительные команды, аномальные parent-child цепочки, подозрительное persistence и связанные сетевые endpoint. Полный evidence остаётся доступным для проверки, а каждое важное наблюдение привязано к исходной строке.
 
-Проект рассчитан на self-hosted Linux + Docker, поддерживает tenant-изоляцию, SQLite, роли пользователей, отчёты, SMTP/Telegram и подключение внешней AI-модели по API. Последний стабильный релиз: **2.6.25**. Кандидат следующего выпуска: **2.6.26-rc.1** ([результаты и ограничения](https://github.com/cyb3rpeace/BroSecurityADAudit/releases/tag/v2.6.26-rc.1)). Техническая документация: [Threat Hunting Technical Reference](docs/THREAT_HUNTING.md). История изменений: [CHANGELOG.md](CHANGELOG.md).
+Проект рассчитан на self-hosted Linux + Docker, поддерживает tenant-изоляцию, SQLite, роли пользователей, отчёты, SMTP/Telegram и подключение внешней AI-модели по API. Последний стабильный релиз: **2.6.25**. Production Threat Hunting rollout зафиксирован в документации milestone; публикация следующего релиза выполняется отдельно после release-tag и Windows acceptance. Техническая документация: [Threat Hunting Technical Reference](docs/THREAT_HUNTING.md). История изменений: [CHANGELOG.md](CHANGELOG.md).
 
 > **Статус:** эксплуатационная готовность зависит от проверенной матрицы покрытия и acceptance в целевой инфраструктуре. На этой версии Windows EVTX/WMI/Registry Run/RunOnce остаются candidate и не упаковываются; сборка не должна считаться полной DFIR. Linux-профили ограничены фиксированными источниками и требуют проверки конкретного хоста. Проект не объявляется полностью production-ready для всех расследований до Windows real-engine acceptance, регрессионных испытаний и целевого rollout.
 
@@ -203,6 +203,14 @@ Enable-NetFirewallRule -Name WINRM-HTTP-In-TCP
 ## 🔒 Чего в репозитории нет
 
 Результатов сканирования, базы, сертификатов, паролей домена, токенов почты, Telegram и ключей модели. Не добавляйте их в коммиты.
+
+### Threat Hunting final delivery (2026-11-01)
+
+The Threat Hunting milestone is deployed to production in the verified bounded scope. The final delivery record, acceptance results, operational boundaries and rollback-safe update procedure are documented in [docs/THREAT_HUNTING_FINAL.md](docs/THREAT_HUNTING_FINAL.md). The source-by-source matrix remains in [docs/THREAT_HUNTING_COVERAGE.md](docs/THREAT_HUNTING_COVERAGE.md).
+
+Verified in the release workflow: encrypted tenant-scoped archive import with SHA-256 integrity, asynchronous worker processing, deterministic host/process/network/service/task/startup triage, Linux service/cron/SUID inventory, evidence citations, timeline/graph views, RU/EN Markdown/PDF reports, and advisory AI reports with citation validation. The project test suite completed with **285 passed and 10 skipped**. Production readiness and authenticated-route smoke checks passed after cutover; existing tenant data, keys, reports and non-hunting functionality were preserved.
+
+This is bounded live-response triage, not complete DFIR. Windows EVTX (Security, PowerShell, Defender, RDP), WMI persistence and Registry Run/RunOnce remain `candidate` and are excluded from executable packages until real Windows acceptance is signed off. Missing or empty sources never prove absence of compromise. Do not present this module as unrestricted incident-response coverage, memory acquisition or full-disk imaging.
 
 ### Threat Hunting release readiness (2026-10-31)
 
