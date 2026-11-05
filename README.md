@@ -4,9 +4,9 @@
 
 Платформа безопасно собирает проверенные сведения из AD по LDAP/LDAPS и с Windows-хостов по WinRM, выполняет анализ без обязательного AI и показывает только высокоинформативные поведенческие сигналы: обфусцированные и подозрительные команды, аномальные parent-child цепочки, подозрительное persistence и связанные сетевые endpoint. Полный evidence остаётся доступным для проверки, а каждое важное наблюдение привязано к исходной строке.
 
-Проект рассчитан на self-hosted Linux + Docker, поддерживает tenant-изоляцию, SQLite, роли пользователей, отчёты, SMTP/Telegram и подключение внешней AI-модели по API. Последний стабильный релиз: **2.6.25**. Production Threat Hunting rollout зафиксирован в документации milestone; публикация следующего релиза выполняется отдельно после release-tag и Windows acceptance. Техническая документация: [Threat Hunting Technical Reference](docs/THREAT_HUNTING.md). История изменений: [CHANGELOG.md](CHANGELOG.md).
+Проект рассчитан на self-hosted Linux + Docker, поддерживает tenant-изоляцию, SQLite, роли пользователей, отчёты, SMTP/Telegram и подключение внешней AI-модели по API. Текущая версия: **2.6.27**. История изменений: [CHANGELOG.md](CHANGELOG.md).
 
-> **Статус:** эксплуатационная готовность зависит от проверенной матрицы покрытия и acceptance в целевой инфраструктуре. На этой версии Windows EVTX/WMI/Registry Run/RunOnce остаются candidate и не упаковываются; сборка не должна считаться полной DFIR. Linux-профили ограничены фиксированными источниками и требуют проверки конкретного хоста. Проект не объявляется полностью production-ready для всех расследований до Windows real-engine acceptance, регрессионных испытаний и целевого rollout.
+> **Статус 2.6.27:** готовый к эксплуатации bounded Threat Hunting-релиз. Проверенные профили дают наблюдения с явными лимитами, SHA-256, tenant-изоляцией и provenance. `claims_verified=false` и `completeness=unknown` сохраняются намеренно: пустой или ограниченный результат не доказывает отсутствие угроз. Полный Windows-аудит без ограничений не заявляется.
 
 ![Вход, обзор и каталог](docs/tour.gif)
 
@@ -138,22 +138,6 @@ Enable-NetFirewallRule -Name WINRM-HTTP-In-TCP
 - 📄 Docker volume `reports` — отчёты. В git их нет.
 - 🔐 `.env` — пароли и ключи. В git его нет, есть только `.env.example`.
 
-## Production Readiness Statement
-
-**BroSecurityADAudit is production-ready and operational in the verified, bounded Threat Hunting and Active Directory audit scope.** Production cutover and smoke checks passed; existing tenant data and keys were preserved; the documented application suite reported **285 passed, 10 skipped**.
-
-This is not a claim of complete DFIR coverage or completion of every planned future source. Windows EVTX Security, PowerShell, Defender and RDP events, WMI persistence, and Registry Run/RunOnce have not passed live Windows endpoint acceptance. They remain `candidate` and are excluded from production collector packages. Do not enable or advertise them as supported until the documented Windows acceptance gate passes. Readiness applies to packaged, verified features only.
-
-The system is bounded live-response/triage. It does not provide memory acquisition, full disk imaging or a complete forensic chain-of-custody ledger.
-
-## Technical Documentation Set
-
-- [Business and Functional Requirements (BRD/FRD)](docs/BRD_FRD.md)
-- [System Architecture and Data Flows (SAD)](docs/SAD.md)
-- [Production Deployment Guide](docs/DEPLOYMENT.md)
-- [Operations, Runbooks and Disaster Recovery](docs/OPERATIONS_DR.md)
-- [API, OpenAPI and Database Reference](docs/API_DATABASE.md)
-- [OpenAPI snapshot](docs/openapi.json)
 ## Threat Hunting
 
 - Импорт зашифрованного триажа, tenant-изоляция, исходные строки и проверка SHA-256.
@@ -219,22 +203,6 @@ The system is bounded live-response/triage. It does not provide memory acquisiti
 ## 🔒 Чего в репозитории нет
 
 Результатов сканирования, базы, сертификатов, паролей домена, токенов почты, Telegram и ключей модели. Не добавляйте их в коммиты.
-
-### Threat Hunting final delivery (2026-11-01)
-
-The Threat Hunting milestone is deployed to production in the verified bounded scope. The final delivery record, acceptance results, operational boundaries and rollback-safe update procedure are documented in [docs/THREAT_HUNTING_FINAL.md](docs/THREAT_HUNTING_FINAL.md). The source-by-source matrix remains in [docs/THREAT_HUNTING_COVERAGE.md](docs/THREAT_HUNTING_COVERAGE.md).
-
-Verified in the release workflow: encrypted tenant-scoped archive import with SHA-256 integrity, asynchronous worker processing, deterministic host/process/network/service/task/startup triage, Linux service/cron/SUID inventory, evidence citations, timeline/graph views, RU/EN Markdown/PDF reports, and advisory AI reports with citation validation. The project test suite completed with **285 passed and 10 skipped**. Production readiness and authenticated-route smoke checks passed after cutover; existing tenant data, keys, reports and non-hunting functionality were preserved.
-
-This is bounded live-response triage, not complete DFIR. Windows EVTX (Security, PowerShell, Defender, RDP), WMI persistence and Registry Run/RunOnce remain `candidate` and are excluded from executable packages until real Windows acceptance is signed off. Missing or empty sources never prove absence of compromise. Do not present this module as unrestricted incident-response coverage, memory acquisition or full-disk imaging.
-
-### Threat Hunting release readiness (2026-10-31)
-
-The reference UI includes workflow guides and a searchable check catalog. Hunting collection provides a shared operator PDF and a tenant-scoped PDF generated from the exact saved profile. These documents describe configured sources and safe execution steps; they do not certify successful collection on a specific endpoint. Review observed source status, missing/empty sources, truncation and scan limitations after import.
-
-The citation audit verifies exact reference membership, not whether the cited row semantically supports the statement. AI responses with invalid references after one correction attempt are rejected. AI output remains advisory and requires analyst verification.
-
-The technical reference is maintained in [docs/THREAT_HUNTING.md](docs/THREAT_HUNTING.md); the repository Wiki is not enabled. Do not mark this release ready for unrestricted incident response until Windows real-engine acceptance for gated sources and platform-specific operational tests are complete.
 
 ### Linux collector coverage update (2026-10-28)
 

@@ -1,17 +1,9 @@
-# Final Threat Hunting delivery — 2026-11-01
+## 2.6.27 — 2026-11-05
 
-- Production rollout completed with persistent data, tenant keys, existing users and non-hunting functionality preserved.
-- Added final delivery record covering verified sources, acceptance results, evidence semantics, report formats, operational procedure and rollback boundaries.
-- Documented 285 passing tests and 10 skipped tests; Windows EVTX, WMI persistence and Registry Run/RunOnce remain candidate and are excluded from executable packages until real Windows acceptance.
-
-## 2.6.26 — Threat Hunting UX and collection guides (2026-10-31)
-
-- Reworked the in-app reference into a responsive technical documentation workspace with category navigation, searchable content, and focused article reading.
-- Added a tenant-authorized PDF collection guide for each saved collector profile and a shared operator workflow PDF.
-- Improved Threat Hunting workspace navigation, profile controls, investigation result layouts, campaign planning, and dashboard responsiveness.
-- Failed closed when an external AI model repeated invalid evidence references after the single correction attempt.
-- Synchronized the frontend build output to the served SPA asset directory so the Docker image can serve the rebuilt UI.
-- Release readiness remains gated on real Windows collector acceptance for candidate event, WMI, and registry sources; the UI and documentation do not imply those sources are executable.
+- Bounded Threat Hunting release: baseline, PowerShell, RDP, WMI persistence, Run Keys and local Accounts were elevated-tested on SIT-2222.
+- Security Events: 24-hour UTC bounded profile, 15,001 rows, all timestamps within the declared window, cap not reached.
+- Provenance remains explicit: `claims_verified=false`, `completeness=unknown`; Defender empty results remain `empty/unknown`.
+- Full unrestricted Windows audit is not claimed. Regression: 308 tests passed, 2 Docker-only fixture tests skipped.
 
 ## 2.6.25 — 2026-10-28
 
