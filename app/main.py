@@ -3667,7 +3667,15 @@ def hunting_catalog(user: User = Depends(get_user)):
 @app.get("/api/threat-hunting/manual")
 def hunting_manual(user: User = Depends(get_user)):
     from app.modules.hunting_manual import manual
-    return JSONResponse(manual(), headers={"Cache-Control": "no-store"})
+    data = manual()
+    lines = [data.get("title", "BroSec Threat Hunting"), "", data.get("warning", "")]
+    for section in data.get("sections", []):
+        lines.extend(["", section.get("title", "")])
+        for key in ("steps", "items", "rules", "prompts"):
+            for item in section.get(key, []):
+                lines.append("- " + (item if isinstance(item, str) else f"{item.get('id', '')}: {item.get('purpose', '')}"))
+    data["content"] = "\n".join(lines)
+    return JSONResponse(data, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/threat-hunting/profiles")

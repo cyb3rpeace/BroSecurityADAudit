@@ -81,75 +81,62 @@ def _correlations(analysis: dict[str, Any]) -> list[list[Any]]:
             ["process_persistence", analysis.get("triage_summary", {}).get("correlations", {}).get("process_persistence", 0)]]
 
 
-def build_xlsx(path: Path, result: dict[str, Any], analysis: dict[str, Any], reviews: list[dict[str, Any]]) -> None:
-    workbook = Workbook()
-    overview = workbook.active
-    overview.title = "Overview"
-    overview_rows = [
-        ["Field", "Value"], ["Result ID", result.get("id", "")], ["SHA-256", result.get("sha256", "")],
-        ["Created at", result.get("created_at", "")], ["Ruleset", analysis.get("ruleset", "")],
-        ["Verdict", analysis.get("verdict", "not_determined")], ["Matched rules", analysis.get("matched_rules", 0)],
-        ["Rows reviewed", json.dumps(analysis.get("rows_reviewed", {}), ensure_ascii=False)],
-        ["Generated at", datetime.now(timezone.utc).isoformat()],
+def _ru_verdict(analysis: dict[str, Any]) -> str:
+    findings = analysis.get("findings", [])
+    confirmed = [f for f in findings if (f.get("review") or {}).get("status") == "confirmed"]
+    unresolved = [f for f in findings if (f.get("review") or {}).get("status") not in {"benign", "confirmed"}]
+    if confirmed: return "Есть подтверждённые аналитиком находки; компрометация хоста требует отдельного решения"
+    if unresolved: return "Требуется проверка сигналов; заражение/компрометация не подтверждены"
+    return "Не определено: отсутствие находок не доказывает отсутствие компрометации"
+
+
+def _recommendations(analysis: dict[str, Any]) -> list[str]:
+    findings = analysis.get("findings", [])
+    if not findings: return ["Проверьте полноту источников и сохраните исходный архив; пустой результат не является доказательством чистоты."]
+    return [
+        "Сохранить исходный архив и SHA-256; не удалять подозрительный объект до фиксации evidence.",
+        "Проверить цифровую подпись, SHA-256, владельца, ACL, время создания и родительский процесс для каждого сигнала.",
+        "Сопоставить процесс, persistence, пользователя, сетевые соединения и Security/PowerShell события по UTC-времени.",
+        "При подтверждении подозрительной активности изолировать хост по утверждённой процедуре и собрать volatile evidence.",
     ]
-    for row in overview_rows:
-        overview.append(row)
 
-    findings = workbook.create_sheet("Findings")
-    headers = ["rule_id", "title", "triage_level", "classification", "risk_score", "confidence", "source", "row_number", "reason", "review_status", "review_note", "reviewed_at"]
-    findings.append(headers)
-    for row in _rows(analysis, reviews):
-        findings.append(row)
 
-    timeline = workbook.create_sheet("Timeline")
-    timeline.append(["timestamp_utc", "source", "row_number"])
-    for row in _timeline(analysis):
-        timeline.append(row)
-
-    correlations = workbook.create_sheet("Correlations")
-    correlations.append(["type", "count"])
-    for row in _correlations(analysis):
-        correlations.append(row)
-
+def build_xlsx(path: Path, result: dict[str, Any], analysis: dict[str, Any], reviews: list[dict[str, Any]]) -> None:
+    workbook = Workbook(); overview = workbook.active; overview.title = "Обзор"
+    verdict = _ru_verdict(analysis)
+    overview_rows = [["Поле", "Значение"], ["Продукт", "BroSec Audit AD"], ["ID расследования", result.get("id", "")], ["SHA-256 архива", result.get("sha256", "")], ["Создано", result.get("created_at", "")], ["Набор правил", analysis.get("ruleset", "")], ["Вердикт хоста", verdict], ["Найдено сигналов", len(analysis.get("findings", []))], ["Проверено строк", json.dumps(analysis.get("rows_reviewed", {}), ensure_ascii=False)], ["Сформировано UTC", datetime.now(timezone.utc).isoformat()]]
+    for row in overview_rows: overview.append(row)
+    findings = workbook.create_sheet("Находки"); findings.append(["Правило", "Название", "Уровень", "Класс", "Приоритет", "Уверенность", "Источник", "Строка", "Обоснование", "Статус проверки", "Комментарий аналитика", "Время проверки"])
+    for row in _rows(analysis, reviews): findings.append(row)
+    timeline = workbook.create_sheet("Хронология"); timeline.append(["Время", "Источник", "Строка"])
+    for row in _timeline(analysis): timeline.append(row)
+    graph = workbook.create_sheet("Граф связей"); graph.append(["Источник", "Цель", "Отношение", "Уверенность"])
+    for edge in analysis.get("graph", {}).get("edges", []): graph.append([edge.get("source", ""), edge.get("target", ""), edge.get("relation", ""), edge.get("confidence", "")])
+    rec = workbook.create_sheet("Рекомендации"); rec.append(["№", "Рекомендация"])
+    for i, item in enumerate(_recommendations(analysis), 1): rec.append([i, item])
     for sheet in workbook.worksheets:
+        sheet.freeze_panes = "A2"; sheet.auto_filter.ref = sheet.dimensions
+        for cell in sheet[1]: cell.font = Font(bold=True, color="FFFFFF"); cell.fill = PatternFill("solid", fgColor="123B5D")
         for row in sheet.iter_rows():
             for cell in row:
-                if isinstance(cell.value, str):
-                    # Force literal OOXML strings, including values beginning with '='.
-                    cell.data_type = 's'
-        sheet.freeze_panes = "A2"
-        sheet.auto_filter.ref = sheet.dimensions
-        for cell in sheet[1]:
-            cell.font = Font(bold=True, color="FFFFFF")
-            cell.fill = PatternFill("solid", fgColor="1F4E78")
+                if isinstance(cell.value, str): cell.data_type = "s"; cell.alignment = __import__("openpyxl").styles.Alignment(vertical="top", wrap_text=True)
         for column in sheet.columns:
-            width = min(max(max(len(str(cell.value or "")) for cell in column) + 2, 10), 60)
-            sheet.column_dimensions[column[0].column_letter].width = width
-    path.parent.mkdir(parents=True, exist_ok=True)
-    workbook.save(path)
+            width = min(max(max(len(str(cell.value or "")) for cell in column) + 2, 12), 72); sheet.column_dimensions[column[0].column_letter].width = width
+    path.parent.mkdir(parents=True, exist_ok=True); workbook.save(path)
 
 
 def build_pdf(path: Path, result: dict[str, Any], analysis: dict[str, Any], reviews: list[dict[str, Any]]) -> None:
-    styles = getSampleStyleSheet()
-    font = _pdf_font()
-    title = ParagraphStyle("ThreatHuntingTitle", parent=styles["Title"], fontName=font, fontSize=16, leading=20)
-    body = ParagraphStyle("ThreatHuntingBody", parent=styles["BodyText"], fontName=font, fontSize=8, leading=10)
-    small = ParagraphStyle("ThreatHuntingSmall", parent=body, fontSize=6.5, leading=8)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    document = SimpleDocTemplate(str(path), pagesize=landscape(A4), rightMargin=10 * mm, leftMargin=10 * mm, topMargin=10 * mm, bottomMargin=10 * mm)
-    story: list[Any] = [Paragraph("Threat Hunting forensic report", title), Spacer(1, 4 * mm)]
-    story.append(Paragraph(_pdf_text(f"Result: {result.get('id', '')} · SHA-256: {result.get('sha256', '')}"), body))
-    story.append(Paragraph(_pdf_text(f"Ruleset: {analysis.get('ruleset', '')} · Verdict: {analysis.get('verdict', 'not_determined')} · Findings: {len(analysis.get('findings', []))}"), body))
-    story.append(Spacer(1, 4 * mm))
-    table_data = [[Paragraph("Rule", small), Paragraph("Citation", small), Paragraph("Risk", small), Paragraph("Status", small), Paragraph("Reason / analyst note", small)]]
-    for row in _rows(analysis, reviews):
-        table_data.append([Paragraph(_pdf_text(row[0]), small), Paragraph(_pdf_text(f"{row[6]} · row {row[7]}"), small), Paragraph(_pdf_text(row[4]), small), Paragraph(_pdf_text(row[9]), small), Paragraph(f"{_pdf_text(row[8])}<br/>{_pdf_text(row[10])}", small)])
-    table = Table(table_data, colWidths=[35 * mm, 52 * mm, 15 * mm, 32 * mm, 130 * mm], repeatRows=1)
-    table.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1F4E78")), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white), ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#CBD5E1")), ("VALIGN", (0, 0), (-1, -1), "TOP"), ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")])]))
-    story.append(table)
-    story.append(Spacer(1, 4 * mm))
-    story.append(Paragraph("Limitations: heuristic triage is not a confirmed incident verdict; citations refer to the immutable imported evidence and require analyst validation.", small))
-    document.build(story)
+    font = _pdf_font(); styles = getSampleStyleSheet(); title = ParagraphStyle("BroSecTitle", parent=styles["Title"], fontName=font, fontSize=21, leading=25, textColor=colors.HexColor("#123B5D")); h = ParagraphStyle("BroSecH", parent=styles["Heading2"], fontName=font, fontSize=12, leading=15, textColor=colors.HexColor("#087E8B"), spaceBefore=8); body = ParagraphStyle("BroSecBody", parent=styles["BodyText"], fontName=font, fontSize=8.5, leading=11, textColor=colors.HexColor("#263746")); small = ParagraphStyle("BroSecSmall", parent=body, fontSize=7, leading=9)
+    def footer(canvas, doc):
+        canvas.saveState(); canvas.setStrokeColor(colors.HexColor("#D7E4EA")); canvas.line(12*mm, 10*mm, 285*mm, 10*mm); canvas.setFont(font, 7); canvas.setFillColor(colors.HexColor("#587080")); canvas.drawString(12*mm, 6*mm, "BroSec Audit AD · Threat Hunting · только evidence-ориентированный advisory"); canvas.drawRightString(285*mm, 6*mm, f"Страница {doc.page}"); canvas.restoreState()
+    path.parent.mkdir(parents=True, exist_ok=True); doc = SimpleDocTemplate(str(path), pagesize=landscape(A4), rightMargin=12*mm, leftMargin=12*mm, topMargin=14*mm, bottomMargin=16*mm)
+    verdict = _ru_verdict(analysis); story = [Paragraph("BroSec Audit AD", title), Paragraph("Криминалистический отчёт Threat Hunting", h), Paragraph(_pdf_text(f"Расследование: {result.get('id','')} · SHA-256: {result.get('sha256','')}"), body), Paragraph(_pdf_text(f"Вердикт хоста: {verdict}"), body), Paragraph("Важно: эвристические сигналы и неполные источники не являются подтверждением заражения.", small), Paragraph("Находки и evidence", h)]
+    rows = [[Paragraph(x, small) for x in ["Правило", "Источник / строка", "Уровень", "Статус", "Обоснование"]]]
+    for row in _rows(analysis, reviews): rows.append([Paragraph(_pdf_text(row[0]), small), Paragraph(_pdf_text(f"{row[6]} · {row[7]}"), small), Paragraph(_pdf_text(row[2] or row[4]), small), Paragraph(_pdf_text(row[9]), small), Paragraph(_pdf_text(f"{row[8]}\n{row[10]}"), small)])
+    table = Table(rows, colWidths=[42*mm, 60*mm, 22*mm, 35*mm, 118*mm], repeatRows=1); table.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#123B5D")),("TEXTCOLOR",(0,0),(-1,0),colors.white),("GRID",(0,0),(-1,-1),.25,colors.HexColor("#C5D6DE")),("VALIGN",(0,0),(-1,-1),"TOP"),("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,colors.HexColor("#F1F7F9")])]))
+    story += [table, Paragraph("Хронология наблюдений", h), Paragraph(_pdf_text(json.dumps(_timeline(analysis), ensure_ascii=False, indent=2)), small), Paragraph("Граф отношений процессов", h), Paragraph(_pdf_text(json.dumps(analysis.get("graph", {}), ensure_ascii=False, indent=2)), small), Paragraph("Рекомендации", h)]
+    for i, item in enumerate(_recommendations(analysis), 1): story.append(Paragraph(_pdf_text(f"{i}. {item}"), body))
+    story.append(Paragraph("Сформировано: " + datetime.now(timezone.utc).isoformat() + " UTC. Полнота сбора не подтверждена; пустой источник не означает отсутствие активности.", small)); doc.build(story, onFirstPage=footer, onLaterPages=footer)
 
 
 AI_ANSWER_LIMIT = 100_000

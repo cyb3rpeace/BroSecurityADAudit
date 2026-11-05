@@ -207,3 +207,17 @@ Enable-NetFirewallRule -Name WINRM-HTTP-In-TCP
 ### Linux collector coverage update (2026-10-28)
 
 Optional Linux profile sources now include fixed-path cron files and systemd service/timer definitions (1000 rows per source; first 64 KiB per regular file with an explicit truncation flag), and SUID/SGID metadata in `/usr/bin`, `/usr/sbin`, `/bin`, `/sbin`. No command execution or full disk scan. This is evidence collection, not complete Linux DFIR or automatic detection coverage. Root privileges may be needed for protected paths. Missing or empty sources do not establish absence of compromise. Saved profiles can be deleted in the UI without deleting collected archives.
+
+## Актуальные возможности Threat Hunting (2.6.27)
+
+Threat Hunting импортирует подписанные зашифрованные архивы, сохраняет SHA-256 и provenance, извлекает hostname и IP из Host/Network evidence и показывает их в списке расследований. Список поддерживает поиск, фильтр приоритета и страницы по 10 архивов. Расследование содержит bounded deterministic triage, ссылки на исходные строки, timeline, граф `хост → процесс/команда → persistence/endpoint`, инспектор evidence и drag-to-pan по холсту графа.
+
+Коллекторы работают по явным профилям и лимитам: baseline, Security, PowerShell, Defender, RDP, WMI persistence, Registry Run Keys и Accounts. `claims_verified=false`, `completeness=unknown`; empty/missing/truncated источники отражаются явно и не трактуются как отсутствие угроз. Руководство аналитика доступно прямо во вкладке «Руководство» и в PDF.
+
+### AI-ассистент и Deep AI-DFIR advisory
+
+Inline AI-ассистент по API получает ограниченный контекст выбранного расследования и отвечает на вопросы аналитика. Deep AI-DFIR — отдельный opt-in advisory pipeline: только санитизированные выбранные артефакты, отдельная очередь/lease, хеши входа и выхода, ограничение времени/размера и неизменяемые deterministic findings. Его результат является непроверенной рекомендацией и не заменяет findings или решение аналитика.
+
+### Отчёты
+
+Стандартные forensic PDF/XLSX содержат русские заголовки, verdict с корректной оговоркой, evidence citations, timeline, граф отношений и рекомендации. AI-enriched отчёты маркируются как непроверенные и дополнительно содержат AI-ответ, время формирования, область данных, ограничения, аудит ссылок и полную аналитику; они не объявляют хост заражённым без подтверждения.

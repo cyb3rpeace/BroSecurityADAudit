@@ -57,7 +57,7 @@ export function HuntingResults({ companyId, revision, resultId, historyOnly = fa
     if (!selected || !externalOptIn || !analysis) return
     setExternalBusy(true); setError("")
     try {
-      const job = await api<any>(`/api/threat-hunting/external-analysis/jobs?company_id=${companyId}&result_id=${encodeURIComponent(selected.id)}`, { method: "POST", body: JSON.stringify({ profile: "triage", selected_artifacts: ["summary", "findings", "source_coverage", "timeline"], external_ai_opt_in: true }) })
+      const job = await api<any>(`/api/threat-hunting/external-analysis/jobs?company_id=${companyId}&result_id=${encodeURIComponent(selected.id)}`, { method: "POST", body: JSON.stringify({ profile: "triage", selected_artifacts: ["summary", "findings"], external_ai_opt_in: true }) })
       const result = await api<any>(`/api/threat-hunting/external-analysis/jobs/${job.id}/run?company_id=${companyId}`, { method: "POST" })
       setExternalJobs([result]); setExternalOptIn(false)
     } catch (e) { setError(errorMessage(e, "Не удалось запустить advisory AIFT анализ")) } finally { setExternalBusy(false) }
