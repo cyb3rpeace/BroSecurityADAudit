@@ -174,6 +174,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           window.setTimeout(() => void tick(), 2000)
         } else if (watchedId.current === id) {
           watchedId.current = 0
+          setLiveStatus(scan.status || "")
+          if (scan.status === "success" || scan.status === "partial") setLive(null)
         }
       } catch {
         if (watchToken.current === token) setLiveStatus("")

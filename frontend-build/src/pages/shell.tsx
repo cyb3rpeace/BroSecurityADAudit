@@ -215,8 +215,8 @@ export function Shell() {
           {pages[app.view]}
         </main>
       </div>
-      {app.view !== "scan" && app.live && (app.liveStatus === "running" || app.liveStatus === "queued" || app.liveStatus === "failed" || (app.live.modules || []).some((item) => item.state === "error")) ? (
-        <ScanDock data={app.live} fault={app.liveStatus === "failed" || (app.live.modules || []).some((item) => item.state === "error")} onOpen={() => app.setView("scan")} />
+      {app.view !== "scan" && app.live && (app.liveStatus === "running" || app.liveStatus === "queued" || app.liveStatus === "failed") ? (
+        <ScanDock data={app.live} fault={app.liveStatus === "failed"} onOpen={() => app.setView("scan")} />
       ) : null}
       <Sheet open={menu} onOpenChange={setMenu}>
         <SheetContent side="left" className="w-72">
