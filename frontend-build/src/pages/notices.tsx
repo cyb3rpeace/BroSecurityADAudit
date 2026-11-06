@@ -24,6 +24,8 @@ export function Notices({ deliveryTick = 0 }: { deliveryTick?: number }) {
   const [delivery, setDelivery] = useState(false)
   const [topics, setTopics] = useState<Prefs | null>(null)
   const [ready, setReady] = useState({ mail: false, telegram: false })
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
   const [note, setNote] = useState("")
 
   useEffect(() => {
@@ -31,28 +33,49 @@ export function Notices({ deliveryTick = 0 }: { deliveryTick?: number }) {
   }, [deliveryTick])
 
   useEffect(() => {
-    if (!delivery || !companyId) return
-    void api<{ topics: Prefs; mail_ready: boolean; telegram_ready: boolean }>("/api/notifications/prefs?company_id=" + companyId)
+    if (!delivery || companyId == null) return
+    let active = true
+    setLoading(true)
+    setNote("")
+    const params = new URLSearchParams({ company_id: String(companyId) })
+    void api<{ topics: Prefs; mail_ready: boolean; telegram_ready: boolean }>(`/api/notifications/prefs?${params}`)
       .then((data) => {
+        if (!active) return
         setTopics(data.topics)
         setReady({ mail: data.mail_ready, telegram: data.telegram_ready })
       })
-      .catch((reason: unknown) => setNote(reason instanceof Error ? reason.message : "Настройки не прочитаны"))
+      .catch((reason: unknown) => {
+        if (active) {
+          setTopics(null)
+          setNote(reason instanceof Error ? reason.message : "Настройки не прочитаны")
+        }
+      })
+      .finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
   }, [delivery, companyId])
 
   async function save(next: Prefs) {
+    if (companyId == null) {
+      setNote("Компания ещё не определена. Обновите страницу и повторите попытку.")
+      return
+    }
     setTopics(next)
     setNote("")
+    setSaving(true)
     try {
-      await api("/api/notifications/prefs?company_id=" + companyId, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ topics: next }) })
+      const params = new URLSearchParams({ company_id: String(companyId) })
+      const data = await api<{ topics: Prefs }>(`/api/notifications/prefs?${params}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ topics: next }) })
+      setTopics(data.topics)
       setNote("Сохранено. Следующее сканирование пойдёт по этим переключателям.")
     } catch (reason: unknown) {
       setNote(reason instanceof Error ? reason.message : "Не сохранилось")
+    } finally {
+      setSaving(false)
     }
   }
 
   function flip(id: string, channel: "mail" | "telegram", value: boolean) {
-    if (!topics) return
+    if (!topics || loading || saving) return
     const next = { ...topics, [id]: { ...topics[id], [channel]: value } }
     void save(next)
   }
@@ -72,6 +95,7 @@ export function Notices({ deliveryTick = 0 }: { deliveryTick?: number }) {
             <CardTitle className="text-base">Почта и Telegram</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-4">
+            {loading && <p className="text-muted-foreground text-sm">Загрузка настроек доставки…</p>}
             <p className="text-muted-foreground text-sm">
               Почта {ready.mail ? "настроена" : "не настроена"}. Telegram {ready.telegram ? "настроен" : "не настроен"}. Каждая включённая почтовая тема уходит отдельным письмом. Общий список критичных находок не повторяет строки, которые уже ушли отдельной темой. Если доставка сорвётся, строка появится в колокольчике и красной плашкой на любой вкладке.
             </p>
@@ -82,11 +106,11 @@ export function Notices({ deliveryTick = 0 }: { deliveryTick?: number }) {
                   <p className="text-muted-foreground text-xs">{topic.text}</p>
                 </div>
                 <label className="flex items-center gap-2 text-sm">
-                  <Switch checked={!!topics?.[topic.id]?.mail} onCheckedChange={(value) => flip(topic.id, "mail", value)} />
+                  <Switch disabled={loading || saving || !topics} checked={!!topics?.[topic.id]?.mail} onCheckedChange={(value) => flip(topic.id, "mail", value === true)} />
                   Почта
                 </label>
                 <label className="flex items-center gap-2 text-sm">
-                  <Switch checked={!!topics?.[topic.id]?.telegram} onCheckedChange={(value) => flip(topic.id, "telegram", value)} />
+                  <Switch disabled={loading || saving || !topics} checked={!!topics?.[topic.id]?.telegram} onCheckedChange={(value) => flip(topic.id, "telegram", value === true)} />
                   Telegram
                 </label>
               </div>
