@@ -20,7 +20,7 @@ const TOPICS: { id: string; title: string; text: string }[] = [
 type Prefs = Record<string, { mail: boolean; telegram: boolean }>
 
 export function Notices({ deliveryTick = 0 }: { deliveryTick?: number }) {
-  const { t, notices, markAllNotices, deleteNotice } = useApp()
+  const { t, notices, markAllNotices, deleteNotice, companyId } = useApp()
   const [delivery, setDelivery] = useState(false)
   const [topics, setTopics] = useState<Prefs | null>(null)
   const [ready, setReady] = useState({ mail: false, telegram: false })
@@ -31,20 +31,20 @@ export function Notices({ deliveryTick = 0 }: { deliveryTick?: number }) {
   }, [deliveryTick])
 
   useEffect(() => {
-    if (!delivery) return
-    void api<{ topics: Prefs; mail_ready: boolean; telegram_ready: boolean }>("/api/notifications/prefs")
+    if (!delivery || !companyId) return
+    void api<{ topics: Prefs; mail_ready: boolean; telegram_ready: boolean }>("/api/notifications/prefs?company_id=" + companyId)
       .then((data) => {
         setTopics(data.topics)
         setReady({ mail: data.mail_ready, telegram: data.telegram_ready })
       })
       .catch((reason: unknown) => setNote(reason instanceof Error ? reason.message : "Настройки не прочитаны"))
-  }, [delivery])
+  }, [delivery, companyId])
 
   async function save(next: Prefs) {
     setTopics(next)
     setNote("")
     try {
-      await api("/api/notifications/prefs", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ topics: next }) })
+      await api("/api/notifications/prefs?company_id=" + companyId, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ topics: next }) })
       setNote("Сохранено. Следующее сканирование пойдёт по этим переключателям.")
     } catch (reason: unknown) {
       setNote(reason instanceof Error ? reason.message : "Не сохранилось")

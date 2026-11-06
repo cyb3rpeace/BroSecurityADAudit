@@ -166,12 +166,15 @@ def build_pdf(path: Path, result: dict[str, Any], analysis: dict[str, Any], revi
         canvas.drawRightString(w-14*mm, 6*mm, f"СТРАНИЦА {doc.page}")
         canvas.restoreState()
 
+    kind_labels = {"host": "Хост", "process": "Процесс", "network": "Сетевой endpoint", "socket": "Сетевой endpoint", "endpoint": "Сетевой endpoint", "persistence": "Автозапуск / persistence", "service": "Служба", "task": "Задача", "startup": "Автозапуск"}
+    relation_labels = {"parent_child": "родитель → потомок", "network_connection": "процесс → endpoint", "executes": "совпадение пути запуска", "observed_on": "наблюдается на хосте"}
+
     def graph_drawing(graph):
         nodes = graph.get("nodes", [])[:24]
         edges = graph.get("edges", [])[:60]
         width, height, card_w, card_h = 520, 190, 104, 38
         drawing = Drawing(width, height)
-        labels = {str(n.get("id", "")): str(n.get("label") or n.get("name") or n.get("id", ""))[:18] for n in nodes}
+        labels = {str(n.get("id", "")): (str(n.get("label") or n.get("name") or n.get("id", ""))[:18], kind_labels.get(str(n.get("kind", "")).lower(), "Объект доказательств")) for n in nodes}
         ids = list(labels)
         positions = {node_id: (12 + (i % 4) * 126, height - 42 - (i // 4) * 58) for i, node_id in enumerate(ids)}
         for edge in edges:
@@ -179,16 +182,16 @@ def build_pdf(path: Path, result: dict[str, Any], analysis: dict[str, Any], revi
             if a in positions and b in positions:
                 x1,y1=positions[a]; x2,y2=positions[b]
                 drawing.add(Line(x1+card_w,y1+card_h/2,x2,y2+card_h/2,strokeColor=colors.HexColor("#64748B"),strokeWidth=1.2))
-                drawing.add(String((x1+x2+card_w)/2, (y1+y2+card_h)/2+5, "→", fontName=font, fontSize=8, fillColor=colors.HexColor("#2563EB")))
+                drawing.add(String((x1+x2+card_w)/2, (y1+y2+card_h)/2+5, relation_labels.get(str(edge.get("relation", "")), str(edge.get("relation", ""))[:18]), fontName=font, fontSize=5.2, fillColor=colors.HexColor("#2563EB")))
         for node_id, (x,y) in positions.items():
             drawing.add(Rect(x,y,card_w,card_h,rx=5,ry=5,fillColor=colors.HexColor("#EFF6FF"),strokeColor=colors.HexColor("#2563EB"),strokeWidth=1))
-            drawing.add(String(x+6,y+card_h-13,labels[node_id],fontName=font,fontSize=6.5,fillColor=ink))
-            drawing.add(String(x+6,y+7,"evidence node",fontName=font,fontSize=5.5,fillColor=slate))
+            drawing.add(String(x+6,y+card_h-13,labels[node_id][0],fontName=font,fontSize=6.5,fillColor=ink))
+            drawing.add(String(x+6,y+7,labels[node_id][1],fontName=font,fontSize=5.2,fillColor=slate))
         return drawing
 
     path.parent.mkdir(parents=True, exist_ok=True)
     doc = SimpleDocTemplate(str(path), pagesize=landscape(A4), rightMargin=17*mm, leftMargin=17*mm, topMargin=18*mm, bottomMargin=17*mm)
-    story = [Paragraph("Threat Hunting — отчёт расследования", h1), p("BroSec Audit AD · простой evidence-first отчёт", small), Spacer(1, 4*mm), p(f"ID расследования: {result.get('id','')}"), p(f"SHA-256 архива: {result.get('sha256','')}"), PageBreak()]
+    story = [Paragraph("Threat Hunting — отчёт расследования", h1), p("BroSec Audit AD · отчёт на русском языке по доказательствам", small), Spacer(1, 4*mm), p(f"ID расследования: {result.get('id','')}"), p(f"SHA-256 архива: {result.get('sha256','')}"), PageBreak()]
     story += [Paragraph("01  РЕЗЮМЕ РАССЛЕДОВАНИЯ", h1), p("Настоящий отчёт содержит только результаты точечного сбора, детерминированного анализа и указанные ссылки на evidence. Он не выполняет внешние исследования и не является самостоятельным подтверждением компрометации."), Spacer(1, 4*mm)]
     summary_data = [["СТАТУС", "ВЕРДИКТ", "СИГНАЛЫ", "ХРОНОЛОГИЯ"], ["Требует проверки", verdict, str(len(finding_rows)), str(len(timeline))]]
     story.append(table(summary_data, [40*mm, 113*mm, 30*mm, 35*mm]))
@@ -208,7 +211,7 @@ def build_pdf(path: Path, result: dict[str, Any], analysis: dict[str, Any], revi
     story.append(graph_drawing(graph))
     edges = graph.get("edges", [])
     story.append(Spacer(1, 4*mm))
-    story.append(table([["Источник", "Отношение", "Цель", "Уверенность"]] + [[str(e.get("source","")), str(e.get("relation","")), str(e.get("target","")), str(e.get("confidence",""))] for e in edges[:100]] or [["—","Связи не представлены","—","—"]], [62*mm, 48*mm, 62*mm, 35*mm]))
+    story.append(table([["Источник", "Отношение", "Цель", "Уверенность"]] + [[str(e.get("source","")), relation_labels.get(str(e.get("relation", "")), str(e.get("relation", ""))), str(e.get("target","")), {"direct": "прямая", "context": "контекст"}.get(str(e.get("confidence", "")), str(e.get("confidence", "")))] for e in edges[:100]] or [["—","Связи не представлены","—","—"]], [62*mm, 48*mm, 62*mm, 35*mm]))
     story.append(PageBreak())
     story += [Paragraph("06  РЕКОМЕНДАЦИИ И ОГОВОРКИ", h1)]
     for i, item in enumerate(_recommendations(analysis), 1): story.append(Paragraph(_pdf_text(f"{i:02d}  {item}"), callout))

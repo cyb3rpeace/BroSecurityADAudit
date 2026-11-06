@@ -116,17 +116,6 @@ export function HuntingEvidenceGraph({ graph, onEvidence }: HuntingEvidenceGraph
     return () => observer.disconnect()
   }, [])
   useEffect(() => { setSelectedId(null); setSelectedEdge(null); setQuery(""); setZoom(0.82); setPan({ x: 0, y: 0 }); viewport.current?.scrollTo({ top: 0, left: 0 }) }, [graph])
-  useEffect(() => {
-    const element = viewport.current
-    if (!element) return
-    const onWheel = (event: WheelEvent) => {
-      event.preventDefault()
-      event.stopPropagation()
-      setZoom(value => Math.max(0.5, Math.min(1.75, Math.round((value + (event.deltaY < 0 ? 0.1 : -0.1)) * 100) / 100)))
-    }
-    element.addEventListener("wheel", onWheel, { passive: false })
-    return () => element.removeEventListener("wheel", onWheel)
-  }, [model.nodes.length])
   const connected = useMemo(() => {
     const ids = new Set<string>(selected ? [selected.id] : [])
     if (selected) for (const edge of model.edges) {

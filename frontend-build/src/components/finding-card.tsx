@@ -271,12 +271,12 @@ export function FindingCard({ finding, remedy }: { finding: Finding; remedy: Rem
   const known = STORY[finding.vuln_id]
   const impact = remedy?.impact || finding.impact || finding.detail
   const remediationKey = finding.vuln_id === "dangerous_acl" || finding.vuln_id === "rat_detected" ? finding.vuln_id : finding.vuln_id
-  const steps = known || [
+  const steps = (known || [
     "Условие: " + finding.title + ". " + finding.detail,
     "Пример: в разборах это отклонение используют как готовую слабость каталога. Отдельное имя инструмента для этой карточки не задано.",
     "Итог: " + impact,
     "Защита: шаги на вкладке «Рекомендации». Платформа сама настройку не меняет.",
-  ]
+  ]).map((step) => step.replace(/^\d+[.)]\s*/, ""))
 
   useEffect(() => {
     if (!companyId || !finding.hostname) return
