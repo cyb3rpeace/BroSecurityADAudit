@@ -137,7 +137,6 @@ export function HuntingEvidenceGraph({ graph, onEvidence }: HuntingEvidenceGraph
   }, [selected, model.edges])
   const refs = selected?.evidence_refs || []
   const adjacent = selected ? model.edges.filter(edge => edge.source === selected.id || edge.target === selected.id) : []
-  const changeZoom = (delta: number) => setZoom(value => Math.max(0.35, Math.min(1.5, Math.round((value + delta) * 100) / 100)))
   const resetView = () => { setZoom(0.58); setPan({ x: 0, y: 0 }); viewport.current?.scrollTo({ top: 0, left: 0, behavior: "smooth" }) }
   const selectNode = (id: string, focus = false) => {
     setSelectedId(id)
