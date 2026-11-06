@@ -42,7 +42,8 @@ export function HuntingEvidenceGraph({ graph, onEvidence }: HuntingEvidenceGraph
   const [selectedEdge, setSelectedEdge] = useState<{ source: string; target: string; relation: string; confidence: string } | null>(null)
   const [zoom, setZoom] = useState(0.58)
   const [pan, setPan] = useState({ x: 0, y: 0 })
-  const drag = useRef<{ pointerId: number; x: number; y: number; panX: number; panY: number; moved: boolean } | null>(null)
+  const [nodePositions, setNodePositions] = useState<Record<string, { x: number; y: number }>>({})
+  const drag = useRef<{ pointerId: number; mode: "canvas" | "node"; nodeId?: string; x: number; y: number; panX: number; panY: number; nodeX?: number; nodeY?: number; moved: boolean } | null>(null)
   const wasDragged = useRef(false)
   const viewport = useRef<HTMLDivElement>(null)
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 540 })
@@ -103,6 +104,14 @@ export function HuntingEvidenceGraph({ graph, onEvidence }: HuntingEvidenceGraph
       width: Math.max(840, PAD * 2 + Math.max(0, ...ranks.values()) * COL + CARD_W),
       height: Math.max(360, PAD * 2 + (Math.max(1, ...rows.values()) - 1) * ROW + CARD_H) }
   }, [graph, query])
+  const positions = useMemo(() => {
+    const next = new Map(model.positions)
+    for (const node of model.nodes) {
+      const override = nodePositions[node.id]
+      if (override) next.set(node.id, override)
+    }
+    return next
+  }, [model.positions, model.nodes, nodePositions])
   const selected = model.nodes.find(node => node.id === selectedId)
   const selectedEdgeSource = selectedEdge ? model.nodes.find(node => node.id === selectedEdge.source) : undefined
   const selectedEdgeTarget = selectedEdge ? model.nodes.find(node => node.id === selectedEdge.target) : undefined
@@ -115,18 +124,7 @@ export function HuntingEvidenceGraph({ graph, onEvidence }: HuntingEvidenceGraph
     observer.observe(element)
     return () => observer.disconnect()
   }, [])
-  useEffect(() => { setSelectedId(null); setSelectedEdge(null); setQuery(""); setZoom(0.58); setPan({ x: 0, y: 0 }); viewport.current?.scrollTo({ top: 0, left: 0 }) }, [graph])
-  useEffect(() => {
-    const element = viewport.current
-    if (!element) return
-    const onWheel = (event: WheelEvent) => {
-      event.preventDefault()
-      const delta = event.deltaY < 0 ? 0.1 : -0.1
-      setZoom(value => Math.max(0.35, Math.min(1.5, Math.round((value + delta) * 100) / 100)))
-    }
-    element.addEventListener("wheel", onWheel, { passive: false })
-    return () => element.removeEventListener("wheel", onWheel)
-  }, [])
+  useEffect(() => { setSelectedId(null); setSelectedEdge(null); setQuery(""); setZoom(0.58); setPan({ x: 0, y: 0 }); setNodePositions({}); viewport.current?.scrollTo({ top: 0, left: 0 }) }, [graph])
   const connected = useMemo(() => {
     const ids = new Set<string>(selected ? [selected.id] : [])
     if (selected) for (const edge of model.edges) {
@@ -137,7 +135,7 @@ export function HuntingEvidenceGraph({ graph, onEvidence }: HuntingEvidenceGraph
   }, [selected, model.edges])
   const refs = selected?.evidence_refs || []
   const adjacent = selected ? model.edges.filter(edge => edge.source === selected.id || edge.target === selected.id) : []
-  const resetView = () => { setZoom(0.58); setPan({ x: 0, y: 0 }); viewport.current?.scrollTo({ top: 0, left: 0, behavior: "smooth" }) }
+  const resetView = () => { setZoom(0.58); setPan({ x: 0, y: 0 }); setNodePositions({}); viewport.current?.scrollTo({ top: 0, left: 0, behavior: "smooth" }) }
   const selectNode = (id: string, focus = false) => {
     setSelectedId(id)
     if (focus) { const element = nodeElements.current.get(id); element?.focus(); element?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" }) }
@@ -168,11 +166,15 @@ export function HuntingEvidenceGraph({ graph, onEvidence }: HuntingEvidenceGraph
         <div className="flex flex-wrap gap-x-4 gap-y-2 border-b px-4 py-2 text-[10px] text-muted-foreground">{["process", "network", "persistence", "host"].map(kind => { const info = kindInfo(kind); return <span key={kind} className="inline-flex items-center gap-1.5"><info.Icon className={`h-3.5 w-3.5 ${info.color}`} aria-hidden="true" />{info.label}</span> })}<span>→ направление отношения, не поток атаки</span></div>
         <p id={helpId} className="px-4 py-2 text-[11px] text-muted-foreground">Колёсико мыши — масштаб; Tab — узел; Enter / пробел — инспектор; стрелки — соседний узел в списке; Esc — снять выбор. Зажмите левую кнопку мыши на фоне и перемещайте граф в любую сторону; колёсико/панель масштаба изменяют размер. Область также прокручивается по обеим осям.</p>
         {!model.nodes.length ? <div className="flex min-h-80 flex-col items-center justify-center gap-3 p-8 text-center"><GitBranch className="h-9 w-9 text-muted-foreground" aria-hidden="true" /><h4 className="font-medium">{query.trim() ? "Совпадений нет" : "Сильных поведенческих связей не выявлено"}</h4><p className="max-w-lg text-sm text-muted-foreground">{query.trim() ? "Попробуйте имя процесса, адрес или путь источника. Поиск не создаёт новых связей." : "В основном графе скрыт обычный фон. Показаны только поведенческие сигналы и их доказательный контекст. Проверьте полноту сбора и исходные данные: пустой граф не доказывает безопасность."}</p>{query && <button type="button" className={controlClass} onClick={() => setQuery("")}>Очистить поиск</button>}</div>
-          : <div ref={viewport} tabIndex={0} role="region" aria-label="Перетаскиваемая схема связей" aria-describedby={helpId} className="h-[min(70vh,760px)] min-h-[420px] w-full max-w-full cursor-grab overflow-auto bg-muted/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary" style={{ touchAction: "none" }} onPointerDown={event => {
+          : <div ref={viewport} tabIndex={0} role="region" aria-label="Перетаскиваемая схема связей" aria-describedby={helpId} className="h-[min(70vh,760px)] min-h-[420px] w-full max-w-full cursor-grab overflow-auto bg-muted/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary" style={{ touchAction: "none" }} onWheel={event => {
+              event.preventDefault()
+              const delta = event.deltaY < 0 ? 0.1 : -0.1
+              setZoom(value => Math.max(0.35, Math.min(1.5, Math.round((value + delta) * 100) / 100)))
+            }} onPointerDown={event => {
               if (event.button !== 0 || (event.target instanceof Element && event.target.closest('[role="button"]')) || !viewport.current) return
               event.preventDefault()
               wasDragged.current = false
-              drag.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, panX: pan.x, panY: pan.y, moved: false }
+              drag.current = { mode: "canvas", pointerId: event.pointerId, x: event.clientX, y: event.clientY, panX: pan.x, panY: pan.y, moved: false }
               viewport.current.setPointerCapture(event.pointerId)
               viewport.current.style.cursor = "grabbing"
             }} onPointerMove={event => {
@@ -183,7 +185,11 @@ export function HuntingEvidenceGraph({ graph, onEvidence }: HuntingEvidenceGraph
               if (Math.abs(dx) + Math.abs(dy) <= 4) return
               start.moved = true
               wasDragged.current = true
-              setPan({ x: start.panX + dx, y: start.panY + dy })
+              if (start.mode === "node" && start.nodeId && start.nodeX !== undefined && start.nodeY !== undefined) {
+                setNodePositions(current => ({ ...current, [start.nodeId!]: { x: start.nodeX! + dx / zoom, y: start.nodeY! + dy / zoom } }))
+              } else {
+                setPan({ x: start.panX + dx, y: start.panY + dy })
+              }
             }} onPointerUp={event => {
               const start = drag.current
               if (!start || start.pointerId !== event.pointerId) return
@@ -201,8 +207,8 @@ export function HuntingEvidenceGraph({ graph, onEvidence }: HuntingEvidenceGraph
               <rect width="100%" height="100%" fill={`url(#${uid}-grid)`} aria-hidden="true" />
               <g transform={`translate(${pan.x / zoom},${pan.y / zoom})`}>
               {model.edges.map((edge, index) => {
-                const from = model.positions.get(edge.source)!
-                const to = model.positions.get(edge.target)!
+                const from = positions.get(edge.source)!
+                const to = positions.get(edge.target)!
                 const forward = to.x > from.x
                 const startX = forward ? from.x + CARD_W : from.x + CARD_W / 2
                 const startY = forward ? from.y + CARD_H / 2 : from.y
@@ -221,10 +227,19 @@ export function HuntingEvidenceGraph({ graph, onEvidence }: HuntingEvidenceGraph
                 </g>
               })}
               {model.nodes.map((node, index) => {
-                const point = model.positions.get(node.id)!
+                const point = positions.get(node.id)!
                 const info = kindInfo(node.kind)
                 const active = selected?.id === node.id
-                return <g key={node.id} ref={element => { if (element) nodeElements.current.set(node.id, element); else nodeElements.current.delete(node.id) }} transform={`translate(${point.x},${point.y})`} tabIndex={0} role="button" aria-pressed={active} aria-label={`${info.label}: ${node.label}; ID ${node.id}; источников: ${node.evidence_refs?.length || 0}`} onPointerDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); if (!wasDragged.current) { setSelectedEdge(null); selectNode(node.id) } wasDragged.current = false }} onKeyDown={event => {
+                return <g key={node.id} ref={element => { if (element) nodeElements.current.set(node.id, element); else nodeElements.current.delete(node.id) }} transform={`translate(${point.x},${point.y})`} tabIndex={0} role="button" aria-pressed={active} aria-label={`${info.label}: ${node.label}; ID ${node.id}; источников: ${node.evidence_refs?.length || 0}`} onPointerDown={event => {
+                  event.stopPropagation()
+                  if (event.button !== 0 || !viewport.current) return
+                  event.preventDefault()
+                  const point = positions.get(node.id)!
+                  drag.current = { mode: "node", nodeId: node.id, pointerId: event.pointerId, x: event.clientX, y: event.clientY, panX: pan.x, panY: pan.y, nodeX: point.x, nodeY: point.y, moved: false }
+                  wasDragged.current = false
+                  viewport.current.setPointerCapture(event.pointerId)
+                  viewport.current.style.cursor = "grabbing"
+                }} onClick={event => { event.stopPropagation(); if (!wasDragged.current) { setSelectedEdge(null); selectNode(node.id) } wasDragged.current = false }} onKeyDown={event => {
                   if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectNode(node.id) }
                   else if (event.key === "Escape") { event.preventDefault(); setSelectedId(null) }
                   else if (["ArrowRight", "ArrowDown", "ArrowLeft", "ArrowUp", "Home", "End"].includes(event.key)) {

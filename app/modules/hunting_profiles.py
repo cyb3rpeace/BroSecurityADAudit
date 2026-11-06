@@ -14,7 +14,11 @@ CATALOG = [
     {"id": "linux_services", "title": "Службы Linux", "platforms": ["linux"], "source": "LinuxServices", "status": "collection_supported", "max_rows": 1000, "privacy": "high", "note": "Фиксированные systemd service/timer пути: до 1000 файлов, первые 64 КБ; без systemctl. Drop-in и каталоги-ссылки пропускаются. Не инвентарь активных служб."},
     {"id": "linux_crontab", "title": "Cron и планировщик Linux", "platforms": ["linux"], "source": "LinuxCrontab", "status": "collection_supported", "max_rows": 1000, "privacy": "high", "note": "Системные и пользовательские crontab, cron-скрипты: до 1000 файлов, первые 64 КБ. Содержимое может включать секреты; усечение отмечается."},
     {"id": "linux_suid", "title": "SUID/SGID-файлы", "platforms": ["linux"], "source": "LinuxSUID", "status": "collection_supported", "max_rows": 10000, "privacy": "moderate", "note": "Метаданные SUID/SGID и числовые UID/GID только /usr/bin, /usr/sbin, /bin, /sbin; каталоги-ссылки пропускаются. Не полный обход диска; без содержимого."},
-    {"id": "services", "title": "Службы", "platforms": ["windows"], "source": "Services", "status": "analysis_supported", "max_rows": 10000, "privacy": "high", "note": "Состояние и конфигурация служб Windows."},
+
+    {"id": "linux_ssh_pam", "title": "SSH и PAM", "platforms": ["linux"], "source": "LinuxSSHPAM", "status": "collection_supported", "max_rows": 1000, "privacy": "high", "note": "Фиксированные SSH/PAM конфигурации, read-only bounded текст с отметкой усечения."},
+    {"id": "linux_file_timeline", "title": "Ограниченная file timeline", "platforms": ["linux"], "source": "LinuxFileTimeline", "status": "collection_supported", "max_rows": 10000, "privacy": "high", "note": "Метаданные файлов фиксированных каталогов; не полная история и не восстановление удалённых файлов."},
+    {"id": "linux_capabilities", "title": "Linux capabilities", "platforms": ["linux"], "source": "LinuxCapabilities", "status": "collection_supported", "max_rows": 10000, "privacy": "moderate", "note": "Метаданные файлов системных каталогов; без полного обхода диска."},
+    {"id": "linux_package_integrity", "title": "Целостность пакетов", "platforms": ["linux"], "source": "LinuxPackageIntegrity", "status": "collection_supported", "max_rows": 2000, "privacy": "moderate", "note": "Фиксированные package manifest/checksum файлы; пакетный менеджер не запускается."},    {"id": "services", "title": "Службы", "platforms": ["windows"], "source": "Services", "status": "analysis_supported", "max_rows": 10000, "privacy": "high", "note": "Состояние и конфигурация служб Windows."},
     {"id": "tasks", "title": "Задания планировщика", "platforms": ["windows"], "source": "Tasks", "status": "analysis_supported", "max_rows": 10000, "privacy": "high", "note": "Действия и учётные записи задач; аргументы могут содержать секреты."},
     {"id": "startup", "title": "Автозапуск", "platforms": ["windows"], "source": "Startup", "status": "analysis_supported", "max_rows": 10000, "privacy": "moderate", "note": "Нормализованный снимок Run-ключей и папок автозагрузки; покрытие пользовательских ульев ограничено."},
     {"id": "accounts", "title": "Локальные пользователи и администраторы", "platforms": ["windows"], "source": "Accounts", "status": "analysis_supported", "max_rows": 2000, "privacy": "moderate", "note": "Метаданные локальных записей и Administrators, без обхода доменных групп."},
@@ -40,8 +44,8 @@ EVENT_SOURCE_IDS = frozenset({'security_events', 'powershell_events', 'defender_
 # Event sources are qualified individually from the SIT-2222 acceptance archives.
 # Status means schema/analysis support, not proof that a Windows endpoint succeeded.
 for _item in CATALOG:
-    if _item['id'] in EVENT_SOURCE_IDS:
-        _item.update(status=_item.get('status', 'candidate'), execution_verified=_item.get('execution_verified', False), metadata_only=True,
+    if _item['id'] in EVENT_SOURCE_IDS and _item.get('status') not in {'verified_bounded'}:
+        _item.update(status='candidate_no_telemetry' if _item['id'] == 'defender_events' else 'candidate', execution_verified=_item.get('execution_verified', False), metadata_only=True,
                      note='Экспериментальные метаданные EVTX: UTC-окно до LIMIT; без Message/EventData/ScriptBlock. Исполнение Windows не проверено; упаковка запрещена.')
 
 

@@ -77,7 +77,7 @@ QUERIES = {
     'processes': ('Processes', 'SELECT Pid, Ppid, Name, Exe, Username, CommandLine, CreateTime FROM pslist() LIMIT 10000'),
     'network': ('Network', 'SELECT * FROM netstat() LIMIT 20000'),
 }
-LINUX_SOURCES = {'linux_services': 'LinuxServices', 'linux_crontab': 'LinuxCrontab', 'linux_suid': 'LinuxSUID'}
+LINUX_SOURCES = {'linux_services': 'LinuxServices', 'linux_crontab': 'LinuxCrontab', 'linux_suid': 'LinuxSUID', 'linux_ssh_pam': 'LinuxSSHPAM', 'linux_file_timeline': 'LinuxFileTimeline', 'linux_capabilities': 'LinuxCapabilities', 'linux_package_integrity': 'LinuxPackageIntegrity'}
 # Experimental sources: read-only, allow-listed and bounded. They remain opt-in
 # until a real endpoint pilot verifies the exact engine/plugin contract.
 EXTENDED_SOURCES = {
@@ -163,6 +163,26 @@ LINUX_QUERIES = {
         '/usr/bin/*', '/usr/sbin/*', '/bin/*', '/sbin/*'])),
 }
 
+BOUNDED_LINUX_QUERIES = {
+
+    'linux_ssh_pam': ('LinuxSSHPAM', linux_config_query(['/etc/ssh/sshd_config', '/etc/ssh/ssh_config', '/etc/pam.conf', '/etc/pam.d/*'])),
+}
+
+BOUNDED_LINUX_QUERIES = {
+
+    'linux_file_timeline': ('LinuxFileTimeline', 'SELECT OSPath, Size, Mtime, Ctime, Atime, IsDir, IsLink FROM glob(globs="/etc/**/*", accessor="file") WHERE NOT IsLink LIMIT 10000'),
+}
+
+BOUNDED_LINUX_QUERIES = {
+
+    'linux_capabilities': ('LinuxCapabilities', 'SELECT OSPath, Size, Mtime, format(format="%s", args=Mode) AS Mode FROM glob(globs="/usr/bin/*", accessor="file") WHERE NOT IsDir AND NOT IsLink LIMIT 10000'),
+}
+
+BOUNDED_LINUX_QUERIES = {
+
+    'linux_package_integrity': ('LinuxPackageIntegrity', linux_config_query(['/var/lib/dpkg/status', '/var/lib/dpkg/info/*.md5sums', '/var/lib/rpm/*', '/lib/apk/db/installed'])),
+}
+
 EXTENDED_LINUX_QUERIES = {
     'linux_auth_logs': ('LinuxAuthLogs', linux_config_query(['/var/log/auth.log', '/var/log/secure', '/var/log/messages'])),
     'linux_audit_logs': ('LinuxAuditLogs', linux_config_query(['/var/log/audit/audit.log'])),
@@ -187,7 +207,7 @@ SELECT * FROM chain(
     FROM scope()})''' % (query, source_id, cap)
 
 
-SUPPORTED = BASE_SUPPORTED | frozenset(PERSISTENCE_QUERIES) | frozenset(LINUX_QUERIES)
+SUPPORTED = BASE_SUPPORTED | frozenset(PERSISTENCE_QUERIES) | frozenset(LINUX_QUERIES) | frozenset(BOUNDED_LINUX_QUERIES)
 EXPERIMENTAL_SUPPORTED = SUPPORTED | frozenset(EXTENDED_QUERIES)
 
 def certificate_info(pem: str):
@@ -251,7 +271,7 @@ def compile_config(profile: dict, public_certificate: str):
     if not re.fullmatch(r'[A-Za-z0-9_-]{1,120}', campaign_id):
         raise ValueError('Некорректный идентификатор кампании')
     validate_profile(profile['platform'], profile['artifacts'], profile['timeout_seconds'], profile['event_days'])
-    supported = (BASE_SUPPORTED | PERSISTENCE_QUERIES.keys() | (EVENT_QUERIES.keys() if profile.get('windows_event_pilot') is True else frozenset()) | (EXTENDED_QUERIES.keys() if profile.get('extended_pilot') is True else frozenset())) if profile['platform'] == 'windows' else (BASE_SUPPORTED | LINUX_QUERIES.keys() | (EXTENDED_LINUX_QUERIES.keys() if profile.get('extended_pilot') is True else frozenset()))
+    supported = (BASE_SUPPORTED | PERSISTENCE_QUERIES.keys() | (EVENT_QUERIES.keys() if profile.get('windows_event_pilot') is True else frozenset()) | (EXTENDED_QUERIES.keys() if profile.get('extended_pilot') is True else frozenset())) if profile['platform'] == 'windows' else (BASE_SUPPORTED | LINUX_QUERIES.keys() | BOUNDED_LINUX_QUERIES.keys() | EXTENDED_LINUX_QUERIES.keys())
     unsupported = sorted(set(profile['artifacts']) - supported)
     if unsupported:
         raise ValueError('Упаковка этих сборов ещё не проверена: ' + ', '.join(unsupported))
@@ -260,7 +280,7 @@ def compile_config(profile: dict, public_certificate: str):
     pem, fingerprint = certificate_info(public_certificate)
     artifact_name = 'BroSec.Offline.Baseline'
     platform = profile['platform']
-    definitions = QUERIES | PERSISTENCE_QUERIES | LINUX_QUERIES | EXTENDED_QUERIES | (EVENT_QUERIES if profile.get('windows_event_pilot') is True else {})
+    definitions = QUERIES | PERSISTENCE_QUERIES | LINUX_QUERIES | BOUNDED_LINUX_QUERIES | EXTENDED_QUERIES | (EVENT_QUERIES if profile.get('windows_event_pilot') is True else {})
     artifact = {
         'name': artifact_name, 'type': 'CLIENT',
         'description': 'Read-only bounded baseline. Row limits may truncate evidence. Linux skips symlinked parent directories and systemd drop-ins; checks are not atomic against concurrent path replacement.',
