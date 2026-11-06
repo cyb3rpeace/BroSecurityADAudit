@@ -40,7 +40,7 @@ export function HuntingEvidenceGraph({ graph, onEvidence }: HuntingEvidenceGraph
   const [query, setQuery] = useState("")
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [selectedEdge, setSelectedEdge] = useState<{ source: string; target: string; relation: string; confidence: string } | null>(null)
-  const [zoom, setZoom] = useState(1)
+  const [zoom, setZoom] = useState(0.58)
   const [pan, setPan] = useState({ x: 0, y: 0 })
   const drag = useRef<{ pointerId: number; x: number; y: number; panX: number; panY: number; moved: boolean } | null>(null)
   const wasDragged = useRef(false)
@@ -115,7 +115,18 @@ export function HuntingEvidenceGraph({ graph, onEvidence }: HuntingEvidenceGraph
     observer.observe(element)
     return () => observer.disconnect()
   }, [])
-  useEffect(() => { setSelectedId(null); setSelectedEdge(null); setQuery(""); setZoom(0.82); setPan({ x: 0, y: 0 }); viewport.current?.scrollTo({ top: 0, left: 0 }) }, [graph])
+  useEffect(() => { setSelectedId(null); setSelectedEdge(null); setQuery(""); setZoom(0.58); setPan({ x: 0, y: 0 }); viewport.current?.scrollTo({ top: 0, left: 0 }) }, [graph])
+  useEffect(() => {
+    const element = viewport.current
+    if (!element) return
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault()
+      const delta = event.deltaY < 0 ? 0.1 : -0.1
+      setZoom(value => Math.max(0.35, Math.min(1.5, Math.round((value + delta) * 100) / 100)))
+    }
+    element.addEventListener("wheel", onWheel, { passive: false })
+    return () => element.removeEventListener("wheel", onWheel)
+  }, [])
   const connected = useMemo(() => {
     const ids = new Set<string>(selected ? [selected.id] : [])
     if (selected) for (const edge of model.edges) {
@@ -126,13 +137,8 @@ export function HuntingEvidenceGraph({ graph, onEvidence }: HuntingEvidenceGraph
   }, [selected, model.edges])
   const refs = selected?.evidence_refs || []
   const adjacent = selected ? model.edges.filter(edge => edge.source === selected.id || edge.target === selected.id) : []
-  const changeZoom = (delta: number) => setZoom(value => Math.max(0.5, Math.min(1.75, Math.round((value + delta) * 100) / 100)))
-  const handleWheel = (event: React.WheelEvent<HTMLDivElement>) => {
-    event.preventDefault()
-    event.stopPropagation()
-    changeZoom(event.deltaY < 0 ? 0.1 : -0.1)
-  }
-  const resetView = () => { setZoom(0.82); setPan({ x: 0, y: 0 }); viewport.current?.scrollTo({ top: 0, left: 0, behavior: "smooth" }) }
+  const changeZoom = (delta: number) => setZoom(value => Math.max(0.35, Math.min(1.5, Math.round((value + delta) * 100) / 100)))
+  const resetView = () => { setZoom(0.58); setPan({ x: 0, y: 0 }); viewport.current?.scrollTo({ top: 0, left: 0, behavior: "smooth" }) }
   const selectNode = (id: string, focus = false) => {
     setSelectedId(id)
     if (focus) { const element = nodeElements.current.get(id); element?.focus(); element?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" }) }
@@ -145,9 +151,9 @@ export function HuntingEvidenceGraph({ graph, onEvidence }: HuntingEvidenceGraph
     <div className="flex flex-wrap items-center gap-2 border-b p-3">
       <label htmlFor={searchId} className="relative min-w-48 flex-1"><Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" aria-hidden="true" /><input id={searchId} type="search" value={query} onChange={event => { setQuery(event.target.value); setSelectedId(null) }} placeholder="Процесс, IP, ID или источник…" aria-label="Поиск узлов графа" className="h-9 w-full rounded-lg border bg-background pl-9 pr-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" /></label>
       <div className="flex items-center gap-1" role="group" aria-label="Масштаб графа">
-        <button type="button" className={controlClass} aria-label="Уменьшить масштаб" disabled={zoom <= 0.5} onClick={() => setZoom(value => Math.max(0.5, Math.round((value - 0.15) * 100) / 100))}><ZoomOut className="h-4 w-4" aria-hidden="true" /></button>
+        <button type="button" className={controlClass} aria-label="Уменьшить масштаб" disabled={zoom <= 0.35} onClick={() => setZoom(value => Math.max(0.5, Math.round((value - 0.15) * 100) / 100))}><ZoomOut className="h-4 w-4" aria-hidden="true" /></button>
         <output className="w-12 text-center font-mono text-xs" aria-live="polite">{Math.round(zoom * 100)}%</output>
-        <button type="button" className={controlClass} aria-label="Увеличить масштаб" disabled={zoom >= 1.75} onClick={() => setZoom(value => Math.min(1.75, Math.round((value + 0.15) * 100) / 100))}><ZoomIn className="h-4 w-4" aria-hidden="true" /></button>
+        <button type="button" className={controlClass} aria-label="Увеличить масштаб" disabled={zoom >= 1.5} onClick={() => setZoom(value => Math.min(1.5, Math.round((value + 0.1) * 100) / 100))}><ZoomIn className="h-4 w-4" aria-hidden="true" /></button>
         <button type="button" className={controlClass} onClick={resetView}><RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />Сброс вида</button>
       </div>
     </div>
@@ -163,7 +169,7 @@ export function HuntingEvidenceGraph({ graph, onEvidence }: HuntingEvidenceGraph
         <div className="flex flex-wrap gap-x-4 gap-y-2 border-b px-4 py-2 text-[10px] text-muted-foreground">{["process", "network", "persistence", "host"].map(kind => { const info = kindInfo(kind); return <span key={kind} className="inline-flex items-center gap-1.5"><info.Icon className={`h-3.5 w-3.5 ${info.color}`} aria-hidden="true" />{info.label}</span> })}<span>→ направление отношения, не поток атаки</span></div>
         <p id={helpId} className="px-4 py-2 text-[11px] text-muted-foreground">Колёсико мыши — масштаб; Tab — узел; Enter / пробел — инспектор; стрелки — соседний узел в списке; Esc — снять выбор. Зажмите левую кнопку мыши на фоне и перемещайте граф в любую сторону; колёсико/панель масштаба изменяют размер. Область также прокручивается по обеим осям.</p>
         {!model.nodes.length ? <div className="flex min-h-80 flex-col items-center justify-center gap-3 p-8 text-center"><GitBranch className="h-9 w-9 text-muted-foreground" aria-hidden="true" /><h4 className="font-medium">{query.trim() ? "Совпадений нет" : "Сильных поведенческих связей не выявлено"}</h4><p className="max-w-lg text-sm text-muted-foreground">{query.trim() ? "Попробуйте имя процесса, адрес или путь источника. Поиск не создаёт новых связей." : "В основном графе скрыт обычный фон. Показаны только поведенческие сигналы и их доказательный контекст. Проверьте полноту сбора и исходные данные: пустой граф не доказывает безопасность."}</p>{query && <button type="button" className={controlClass} onClick={() => setQuery("")}>Очистить поиск</button>}</div>
-          : <div ref={viewport} tabIndex={0} role="region" aria-label="Перетаскиваемая схема связей" aria-describedby={helpId} className="h-[min(70vh,760px)] min-h-[420px] w-full max-w-full cursor-grab overflow-auto bg-muted/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary" style={{ touchAction: "none" }} onWheel={handleWheel} onPointerDown={event => {
+          : <div ref={viewport} tabIndex={0} role="region" aria-label="Перетаскиваемая схема связей" aria-describedby={helpId} className="h-[min(70vh,760px)] min-h-[420px] w-full max-w-full cursor-grab overflow-auto bg-muted/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary" style={{ touchAction: "none" }} onPointerDown={event => {
               if (event.button !== 0 || (event.target instanceof Element && event.target.closest('[role="button"]')) || !viewport.current) return
               event.preventDefault()
               wasDragged.current = false
